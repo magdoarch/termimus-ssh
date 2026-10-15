@@ -11,6 +11,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { useKeychainStore } from "../../stores/useKeychainStore";
 import { api, KeychainKeyInput } from "../../lib/api";
+import { copySecret, copyText } from "../../lib/clipboard";
 
 export function KeyModal() {
   const { isKeyModalOpen, editingKey, closeKeyModal, saveKey } =
@@ -183,7 +184,7 @@ export function KeyModal() {
   async function handleCopyPublicKey() {
     if (!publicKey) return;
     try {
-      await navigator.clipboard.writeText(publicKey);
+      await copyText(publicKey);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
@@ -311,7 +312,7 @@ export function KeyModal() {
                   <button
                     type="button"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(privateKeyPem);
+                      await copySecret(privateKeyPem);
                       setCopiedPrivateKey(true);
                       setTimeout(() => setCopiedPrivateKey(false), 2000);
                     }}

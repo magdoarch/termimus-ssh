@@ -20,6 +20,7 @@ import { FileEntry } from "../../lib/api";
 import { formatBytes, formatDate, parentPath } from "../../lib/format";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { SelectMods } from "../../stores/useSftpStore";
+import { copyText } from "../../lib/clipboard";
 
 interface FilePaneProps {
   title: string;
@@ -665,7 +666,7 @@ export const FilePane = memo(function FilePane({
                     menuTargets.length > 1
                       ? menuTargets.map((t) => t.path).join("\n")
                       : menuTargets[0]?.path ?? "";
-                  await navigator.clipboard.writeText(value);
+                  await copyText(value);
                   showCopyToast(
                     menuTargets.length > 1
                       ? `Copied ${menuTargets.length} paths`
@@ -743,7 +744,7 @@ export const FilePane = memo(function FilePane({
               {/* Copy Current Path */}
               <button
                 onClick={async () => {
-                  await navigator.clipboard.writeText(path || "/");
+                  await copyText(path || "/");
                   showCopyToast("Copied directory path");
                   setContextMenu(null);
                 }}

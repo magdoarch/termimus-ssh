@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useVaultStore } from "../stores/useVaultStore";
 import { useSettingsStore, AutoLockPolicy } from "../stores/useSettingsStore";
 
@@ -8,8 +9,13 @@ const IDLE_TIMEOUTS: Partial<Record<AutoLockPolicy, number>> = {
 };
 
 export function useAutoLock() {
-  const { isUnlocked, autoLock } = useVaultStore();
-  const { autoLockPolicy } = useSettingsStore();
+  const { isUnlocked, autoLock } = useVaultStore(
+    useShallow((s) => ({
+      isUnlocked: s.isUnlocked,
+      autoLock: s.autoLock,
+    }))
+  );
+  const autoLockPolicy = useSettingsStore((s) => s.autoLockPolicy);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── 1. Idle detection timer (15min / 1hour) ──────────────────────────────

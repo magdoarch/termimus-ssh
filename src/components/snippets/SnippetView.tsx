@@ -20,6 +20,7 @@ import { useSnippetStore } from "../../stores/useSnippetStore";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { Snippet } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 
 export function SnippetView() {
   const {
@@ -30,7 +31,17 @@ export function SnippetView() {
     deleteSnippet,
     openCreateModal,
     openEditModal,
-  } = useSnippetStore();
+  } = useSnippetStore(
+    useShallow((s) => ({
+      snippets: s.snippets,
+      isLoading: s.isLoading,
+      error: s.error,
+      refresh: s.refresh,
+      deleteSnippet: s.deleteSnippet,
+      openCreateModal: s.openCreateModal,
+      openEditModal: s.openEditModal,
+    }))
+  );
   const { tabs, activeTabId, sendTextToActiveSession } = useSessionStore(
     useShallow((s) => ({
       tabs: s.tabs,
@@ -256,7 +267,7 @@ export function SnippetView() {
               {/* Copy Command */}
               <button
                 onClick={async () => {
-                  await navigator.clipboard.writeText(contextMenu.snippet!.command);
+                  await copyText(contextMenu.snippet!.command);
                   showCopyToast("Copied command");
                   setContextMenu(null);
                 }}
@@ -351,7 +362,7 @@ const SnippetCard = memo(function SnippetCard({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(snippet.command);
+      await copyText(snippet.command);
       setIsCopied(true);
       setTimeout(() => setIsCopied(false), 1800);
     } catch {

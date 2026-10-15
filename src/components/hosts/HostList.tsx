@@ -31,6 +31,7 @@ import { FolderModal } from "./FolderModal";
 import { Host, Folder } from "../../lib/api";
 import { DistroBadge } from "./DistroBadge";
 import { HostListRow } from "./HostListRow";
+import { copyText } from "../../lib/clipboard";
 
 // Ping interval: 60s is gentle on router & network, battery-friendly on laptops
 const PING_INTERVAL_MS = 60000;
@@ -794,7 +795,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 onClick={async () => {
                   const port = contextMenu.host!.port || 22;
                   const cmd = `ssh -p ${port} ${contextMenu.host!.username}@${contextMenu.host!.address}`;
-                  await navigator.clipboard.writeText(cmd);
+                  await copyText(cmd);
                   showCopyToast("Copied SSH command");
                   setContextMenu(null);
                 }}
@@ -807,7 +808,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
               {/* Copy Address */}
               <button
                 onClick={async () => {
-                  await navigator.clipboard.writeText(contextMenu.host!.address);
+                  await copyText(contextMenu.host!.address);
                   showCopyToast("Copied host address");
                   setContextMenu(null);
                 }}

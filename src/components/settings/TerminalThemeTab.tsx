@@ -223,7 +223,7 @@ export function TerminalThemeTab() {
               step={0.5}
               value={font.fontSize}
               onChange={(e) => setFont({ fontSize: Number(e.target.value) })}
-              className="w-56 shrink-0 accent-[#00d2b4]"
+              className="w-56 shrink-0 accent-[var(--primary)]"
             />
           </div>
 
@@ -244,7 +244,7 @@ export function TerminalThemeTab() {
               step={0.05}
               value={font.lineHeight}
               onChange={(e) => setFont({ lineHeight: Number(e.target.value) })}
-              className="w-56 shrink-0 accent-[#00d2b4]"
+              className="w-56 shrink-0 accent-[var(--primary)]"
             />
           </div>
 

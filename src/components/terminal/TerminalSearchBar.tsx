@@ -52,18 +52,23 @@ export function TerminalSearchBar({ searchAddon, onClose }: TerminalSearchBarPro
         return;
       }
 
+      // xterm parses decoration colors itself, so resolve the palette
+      // variables to concrete hex values (alpha is appended as hex).
+      const rootStyle = getComputedStyle(document.documentElement);
+      const warning = rootStyle.getPropertyValue("--warning").trim();
+      const primary = rootStyle.getPropertyValue("--primary").trim();
       const options = {
         regex,
         wholeWord,
         caseSensitive,
         incremental: direction === "next",
         decorations: {
-          matchBackground: "#e3b34140",
-          matchBorder: "#e3b34180",
-          matchOverviewRuler: "#e3b341",
-          activeMatchBackground: "#00d2b4",
-          activeMatchBorder: "#00d2b4",
-          activeMatchColorOverviewRuler: "#00d2b4",
+          matchBackground: `${warning}40`,
+          matchBorder: `${warning}80`,
+          matchOverviewRuler: warning,
+          activeMatchBackground: primary,
+          activeMatchBorder: primary,
+          activeMatchColorOverviewRuler: primary,
         },
       };
 
