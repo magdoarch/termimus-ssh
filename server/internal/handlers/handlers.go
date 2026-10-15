@@ -41,7 +41,7 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SyncStatus(w http.ResponseWriter, r *http.Request) {
 	rev, err := h.db.GetLatestRevision()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to query sync revision: "+err.Error())
+		internalError(w, "Failed to query sync revision", err)
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h *Handler) SyncStatus(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetBundle(w http.ResponseWriter, r *http.Request) {
 	blob, version, err := h.db.GetLatestBlob()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to read sync bundle: "+err.Error())
+		internalError(w, "Failed to read sync bundle", err)
 		return
 	}
 
@@ -157,7 +157,7 @@ func (h *Handler) PostBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to save revision: "+err.Error())
+		internalError(w, "Failed to save revision", err)
 		return
 	}
 
@@ -181,7 +181,7 @@ func (h *Handler) PostBundle(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetDevices(w http.ResponseWriter, r *http.Request) {
 	devices, err := h.db.GetDevices()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to query devices: "+err.Error())
+		internalError(w, "Failed to query devices", err)
 		return
 	}
 
@@ -215,6 +215,13 @@ func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
+}
+
+// internalError logs the details server-side and returns a generic message,
+// so database paths/driver errors aren't exposed to clients.
+func internalError(w http.ResponseWriter, message string, err error) {
+	log.Printf("[Error] %s: %v", message, err)
+	writeError(w, http.StatusInternalServerError, message)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {

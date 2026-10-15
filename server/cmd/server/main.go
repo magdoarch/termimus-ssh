@@ -73,7 +73,7 @@ func main() {
 		}
 	}))
 	mux.HandleFunc("/api/v1/sync/devices", auth.Wrap(h.GetDevices))
-	mux.HandleFunc("/api/v1/sync/ws", auth.Wrap(h.WebSocket))
+	mux.HandleFunc("/api/v1/sync/ws", auth.WrapWS(h.WebSocket))
 
 	// No CORS headers on purpose: the desktop client talks to the relay through
 	// native Rust HTTP, so browsers (i.e. arbitrary web pages) never need access.

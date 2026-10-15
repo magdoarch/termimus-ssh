@@ -5,7 +5,7 @@ use aes_gcm::{
 use argon2::{password_hash::rand_core::RngCore, Argon2};
 use rand::rngs::OsRng;
 use std::sync::RwLock;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 const VERIFY_STRING: &[u8] = b"TERMIMUS_VAULT_OK";
 
@@ -40,9 +40,9 @@ impl VaultManager {
         passphrase: &str,
     ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>), String> {
         let salt = VaultManager::generate_salt();
-        let key = VaultManager::derive_key(passphrase, &salt)?;
+        let key = Zeroizing::new(VaultManager::derive_key(passphrase, &salt)?);
 
-        let cipher = Aes256Gcm::new_from_slice(&key)
+        let cipher = Aes256Gcm::new_from_slice(&key[..])
             .map_err(|e| format!("Cipher init failed: {e}"))?;
 
         let mut nonce_bytes = [0u8; 12];
@@ -63,13 +63,13 @@ impl VaultManager {
         salt: &[u8],
         nonce_bytes: &[u8],
     ) -> Result<Vec<u8>, String> {
-        let mut key = [0u8; 32];
+        let mut key = Zeroizing::new([0u8; 32]);
         let argon2 = Argon2::default();
         argon2
-            .hash_password_into(passphrase.as_bytes(), salt, &mut key)
+            .hash_password_into(passphrase.as_bytes(), salt, &mut key[..])
             .map_err(|e| format!("Argon2 derivation error: {e}"))?;
 
-        let cipher = Aes256Gcm::new_from_slice(&key)
+        let cipher = Aes256Gcm::new_from_slice(&key[..])
             .map_err(|e| format!("Cipher init failed: {e}"))?;
 
         if nonce_bytes.len() != 12 {
@@ -104,17 +104,21 @@ impl VaultManager {
     /// Set the derived key in memory after successful unlock
     pub fn set_key(&self, key: [u8; 32]) {
         let mut key_guard = self.derived_key.write().unwrap();
+        // Wipe the previous key (re-unlock / change password) before replacing it
+        if let Some(ref mut old) = *key_guard {
+            old.zeroize();
+        }
         *key_guard = Some(key);
     }
 
     /// Export the current derived key as a hex string (for storing in the OS keyring).
     /// Errors if the vault is currently locked.
-    pub fn export_key_hex(&self) -> Result<String, String> {
+    pub fn export_key_hex(&self) -> Result<Zeroizing<String>, String> {
         let key_guard = self.derived_key.read().unwrap();
         let key_bytes = key_guard
             .as_ref()
             .ok_or_else(|| "Vault is locked".to_string())?;
-        let mut hex = String::with_capacity(64);
+        let mut hex = Zeroizing::new(String::with_capacity(64));
         for b in key_bytes {
             hex.push_str(&format!("{b:02x}"));
         }
