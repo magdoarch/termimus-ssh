@@ -319,6 +319,13 @@ pub struct ImportSummary {
     pub workspace_presets: usize,
     pub vault_meta_restored: bool,
     pub safety_snapshot_path: Option<String>,
+    /// Credentials not imported because the bundle was encrypted with a
+    /// different vault key than the local one (merge only).
+    #[serde(default)]
+    pub credentials_skipped: usize,
+    /// Server revision the pulled bundle came from (sync pulls only).
+    #[serde(default)]
+    pub server_version: Option<u64>,
 }
 
 /// An encrypted outer wrapper for a `BackupBundle`. When exported with a passphrase,

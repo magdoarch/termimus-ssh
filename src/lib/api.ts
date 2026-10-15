@@ -197,7 +197,14 @@ export interface ImportSummary {
   workspace_presets?: number;
   vault_meta_restored: boolean;
   safety_snapshot_path: string | null;
+  /** Credentials skipped because the bundle used a different vault key (merge only) */
+  credentials_skipped: number;
+  /** Server revision of the pulled bundle (sync pulls only) */
+  server_version: number | null;
 }
+
+/** Prefix of the `sync_push` error when another device pushed first (HTTP 409) */
+export const SYNC_CONFLICT_PREFIX = "SYNC_CONFLICT:";
 
 export const api = {
   // Vault
@@ -369,7 +376,8 @@ export const api = {
     syncPassword: string,
     deviceId: string,
     deviceName: string,
-    authToken?: string
+    authToken?: string,
+    baseVersion?: number | null
   ) =>
     invoke<number>("sync_push", {
       serverUrl,
@@ -377,6 +385,7 @@ export const api = {
       deviceId,
       deviceName,
       authToken: authToken?.trim() || null,
+      baseVersion: baseVersion ?? null,
     }),
   syncPull: (serverUrl: string, syncPassword: string, authToken?: string, replaceAll = false) =>
     invoke<ImportSummary>("sync_pull", {

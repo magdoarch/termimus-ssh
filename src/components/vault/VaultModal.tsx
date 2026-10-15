@@ -157,7 +157,7 @@ export function VaultModal() {
     try {
       // Native Rust HTTP pull (CSP blocks webview fetch to arbitrary hosts).
       // replace_all = true so vault salt and verifiers are adopted.
-      await api.syncPull(cleanUrl, syncPassphrase.trim(), syncAuthToken.trim(), true);
+      const summary = await api.syncPull(cleanUrl, syncPassphrase.trim(), syncAuthToken.trim(), true);
 
       // Save sync configuration
       const syncStore = useSyncStore.getState();
@@ -168,7 +168,8 @@ export function VaultModal() {
       useSyncStore.setState({
         syncStatus: "connected",
         lastSyncAt: new Date().toISOString(),
-        latestServerVersion: null,
+        latestServerVersion: summary.server_version,
+        lastSyncedVersion: summary.server_version,
         lastError: null,
       });
 

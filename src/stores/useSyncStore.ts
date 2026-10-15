@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { api, ImportSummary } from "../lib/api";
+import { api, ImportSummary, SYNC_CONFLICT_PREFIX } from "../lib/api";
 import { useHostStore } from "./useHostStore";
 import { useKeychainStore } from "./useKeychainStore";
 import { useSnippetStore } from "./useSnippetStore";
@@ -24,6 +24,8 @@ interface SyncState {
   autoSync: boolean;
   lastSyncAt: string | null;
   latestServerVersion: number | null;
+  /** Server revision this device's data is based on (last own push or pull) */
+  lastSyncedVersion: number | null;
   syncStatus: "idle" | "syncing" | "connected" | "error";
   lastError: string | null;
 
@@ -44,6 +46,23 @@ interface SyncState {
 
 let autoPushTimer: ReturnType<typeof setTimeout> | null = null;
 let saveSecretsTimer: ReturnType<typeof setTimeout> | null = null;
+// A local change arrived while a sync was running; push again once it ends
+let autoPushPending = false;
+
+// Push conflicts are resolved by pull (merge) + push; bound it in case another
+// device keeps pushing in between.
+const MAX_PUSH_ATTEMPTS = 3;
+
+const credentialsSkippedMessage = (count: number) =>
+  `${count} credential${count === 1 ? " was" : "s were"} not synced: they are encrypted with a different vault key ` +
+  `(the master password was changed or set up separately on another device). Set up sync on this device again ` +
+  `with that device's master password to share credentials.`;
+
+function flushPendingAutoPush() {
+  if (!autoPushPending) return;
+  autoPushPending = false;
+  useSyncStore.getState().triggerAutoPush();
+}
 
 // Secrets found in a pre-v1 localStorage entry, moved to the OS keyring on startup
 let legacySecrets: { authToken: string; syncPassword: string } | null = null;
@@ -71,6 +90,7 @@ export const useSyncStore = create<SyncState>()(
       autoSync: false,
       lastSyncAt: null,
       latestServerVersion: null,
+      lastSyncedVersion: null,
       syncStatus: "idle",
       lastError: null,
 
@@ -166,31 +186,43 @@ export const useSyncStore = create<SyncState>()(
         }
 
         const deviceId = getDeviceId();
-        set({ syncStatus: "syncing", lastError: null });
 
         try {
-          // Native Rust HTTP push: bypasses WebKitGTK active mixed-content and CORS blocks entirely
-          const version = await api.syncPush(
-            cleanUrl,
-            cleanPassword,
-            deviceId,
-            deviceName,
-            authToken
-          );
+          for (let attempt = 1; ; attempt++) {
+            set({ syncStatus: "syncing", lastError: null });
+            try {
+              // Native Rust HTTP push: bypasses WebKitGTK active mixed-content and CORS blocks entirely.
+              // base 0 = "never synced": the relay rejects it if it already has data, so
+              // a fresh device merges first instead of overwriting the others.
+              const version = await api.syncPush(
+                cleanUrl,
+                cleanPassword,
+                deviceId,
+                deviceName,
+                authToken,
+                get().lastSyncedVersion ?? 0
+              );
 
-          const now = new Date().toISOString();
-          set({
-            syncStatus: "connected",
-            lastSyncAt: now,
-            latestServerVersion: version,
-            lastError: null,
-          });
-
-          return version;
-        } catch (e) {
-          const msg = String(e);
-          set({ syncStatus: "error", lastError: msg });
-          throw e;
+              set({
+                syncStatus: "connected",
+                lastSyncAt: new Date().toISOString(),
+                latestServerVersion: version,
+                lastSyncedVersion: version,
+                lastError: null,
+              });
+              return version;
+            } catch (e) {
+              const msg = String(e);
+              if (!msg.includes(SYNC_CONFLICT_PREFIX) || attempt >= MAX_PUSH_ATTEMPTS) {
+                set({ syncStatus: "error", lastError: msg.replace(SYNC_CONFLICT_PREFIX, "Sync conflict:") });
+                throw e;
+              }
+              // Another device pushed first: merge its changes, then push the result.
+              await get().pull();
+            }
+          }
+        } finally {
+          flushPendingAutoPush();
         }
       },
 
@@ -217,7 +249,10 @@ export const useSyncStore = create<SyncState>()(
           set({
             syncStatus: "connected",
             lastSyncAt: now,
-            lastError: null,
+            lastError: summary.credentials_skipped > 0 ? credentialsSkippedMessage(summary.credentials_skipped) : null,
+            ...(summary.server_version != null
+              ? { latestServerVersion: summary.server_version, lastSyncedVersion: summary.server_version }
+              : {}),
           });
 
           return summary;
@@ -225,6 +260,8 @@ export const useSyncStore = create<SyncState>()(
           const msg = String(e);
           set({ syncStatus: "error", lastError: msg });
           throw e;
+        } finally {
+          flushPendingAutoPush();
         }
       },
 
@@ -251,6 +288,8 @@ export const useSyncStore = create<SyncState>()(
           autoPushTimer = null;
           try {
             if (get().syncStatus === "syncing") {
+              // Don't drop this change: push again when the running sync ends
+              autoPushPending = true;
               return;
             }
             await get().push();
@@ -272,6 +311,7 @@ export const useSyncStore = create<SyncState>()(
         autoSync: state.autoSync,
         lastSyncAt: state.lastSyncAt,
         latestServerVersion: state.latestServerVersion,
+        lastSyncedVersion: state.lastSyncedVersion,
       }),
       migrate: (persisted, version) => {
         const old = (persisted ?? {}) as Record<string, unknown>;
