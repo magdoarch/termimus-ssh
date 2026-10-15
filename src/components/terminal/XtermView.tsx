@@ -62,12 +62,20 @@ interface TerminalSessionEntry {
   connectionLogs: ConnectionLog[];
   connectionStep: number;
   connectionError: string | null;
+  // Mounted XtermViews for this session. Connection callbacks outlive the
+  // component that started them (split/drag remounts), so they update the
+  // fields above and notify whichever instance is mounted now.
+  connectionListeners: Set<() => void>;
 }
 
 // Module-level persistent pool of active xterm instances.
 // Keeps active SSH sessions, PTY streams, and terminal buffers alive across
 // React layout reconciliations (splitting, moving tabs, un-splitting, resizing).
 const terminalPool = new Map<string, TerminalSessionEntry>();
+
+function notifyConnectionChange(sessionId: string) {
+  terminalPool.get(sessionId)?.connectionListeners.forEach((fn) => fn());
+}
 
 // Shared module-level text encoder to prevent GC pressure during high-speed typing
 const textEncoder = new TextEncoder();
@@ -215,10 +223,11 @@ function bindTerminalShortcuts(
     const isMac = checkIsMac();
     const modKey = isMac ? event.metaKey : event.ctrlKey;
 
-    // Find / Search: Ctrl+F (Linux/Win) or Cmd+F (Mac)
+    // Find / Search: Ctrl+Shift+F (Linux/Win) or Cmd+F (Mac).
+    // Plain Ctrl+F stays with the remote side (forward-char, page down in less/vim).
     if (
       (isMac && modKey && event.key.toLowerCase() === "f") ||
-      (!isMac && (event.ctrlKey || modKey) && event.key.toLowerCase() === "f")
+      (!isMac && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "f")
     ) {
       event.preventDefault();
       onOpenSearch?.();
@@ -236,11 +245,11 @@ function bindTerminalShortcuts(
       return false;
     }
 
-    // Paste: Ctrl+Shift+V, Ctrl+V, Shift+Insert, or Cmd+V
+    // Paste: Ctrl+Shift+V or Shift+Insert (Linux/Win), Cmd+V (Mac).
+    // Plain Ctrl+V is sent through as ^V (vim visual-block, readline quoted-insert).
     if (
       (isMac && modKey && !event.shiftKey && event.key.toLowerCase() === "v") ||
       (!isMac && event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "v") ||
-      (!isMac && event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === "v") ||
       (event.shiftKey && event.key === "Insert")
     ) {
       event.preventDefault();
@@ -511,9 +520,8 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
             entry.hasConnected = true;
             entry.connectionError = null;
           }
-          setIsConnected(true);
           setConnected(sessionId, true);
-          setConnectionError(null);
+          notifyConnectionChange(sessionId);
         })
         .catch((e) => {
           const errStr = String(e);
@@ -521,11 +529,10 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
           if (entry) {
             entry.hasConnected = false;
             entry.connectionError = errStr;
+            entry.term.write(`\r\n\x1b[31mFailed to connect: ${errStr}\x1b[0m\r\n`);
           }
-          setIsConnected(false);
-          setConnectionError(errStr);
           setError(sessionId, errStr);
-          termRef.current?.write(`\r\n\x1b[31mFailed to connect: ${errStr}\x1b[0m\r\n`);
+          notifyConnectionChange(sessionId);
         });
     },
     [hostId, sessionId, host, setConnected, setError, isLocal]
@@ -656,26 +663,35 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
 
       // Stream listeners
       const unlistenFns: Array<() => void> = [];
+      // listen() resolves asynchronously; if the tab was closed (entry disposed
+      // or replaced) before that, unlisten right away instead of leaking.
+      const keepListener = (unlisten: () => void) => {
+        if (terminalPool.get(sessionId)?.unlistenFns === unlistenFns) {
+          unlistenFns.push(unlisten);
+        } else {
+          unlisten();
+        }
+      };
 
       if (isLocal) {
         listen<number[]>(`pty-data-${sessionId}`, (event) => {
           const bytes = new Uint8Array(event.payload);
           term.write(bytes);
-        }).then((unlisten) => unlistenFns.push(unlisten));
+        }).then(keepListener);
 
         listen<void>(`pty-closed-${sessionId}`, () => {
           closeSession(sessionId);
-        }).then((unlisten) => unlistenFns.push(unlisten));
+        }).then(keepListener);
       } else {
         listen<number[]>(`ssh-data-${sessionId}`, (event) => {
           const bytes = new Uint8Array(event.payload);
           term.write(bytes);
-        }).then((unlisten) => unlistenFns.push(unlisten));
+        }).then(keepListener);
 
         listen<string>(`ssh-closed-${sessionId}`, () => {
           // When connection is closed (e.g. exit or Ctrl+D), immediately close the session/tab
           closeSession(sessionId);
-        }).then((unlisten) => unlistenFns.push(unlisten));
+        }).then(keepListener);
 
         listen<SshProgressEvent>(`ssh-progress-${sessionId}`, (event) => {
           const p = event.payload;
@@ -695,13 +711,8 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               poolEntry.connectionError = p.message;
             }
           }
-
-          setCurrentStep(p.step);
-          setLogs((prev) => [...prev, newLog]);
-          if (p.is_error) {
-            setConnectionError(p.message);
-          }
-        }).then((unlisten) => unlistenFns.push(unlisten));
+          notifyConnectionChange(sessionId);
+        }).then(keepListener);
       }
 
       entry = {
@@ -720,6 +731,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
         connectionLogs: [],
         connectionStep: 1,
         connectionError: null,
+        connectionListeners: new Set(),
         highlighter: null,
       };
       // Keyword highlighting overlays (reads live config from the store).
@@ -789,6 +801,25 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // Mirror the pool's connection state. The SSH connect promise and progress
+  // listener are created once per session, so they can't call this instance's
+  // setters directly — a remount (split, drag, dock) would never see the result.
+  useEffect(() => {
+    const entry = terminalPool.get(sessionId);
+    if (!entry || isLocal) return;
+    const sync = () => {
+      setIsConnected(entry.hasConnected);
+      setConnectionError(entry.connectionError);
+      setCurrentStep(entry.connectionStep);
+      setLogs(entry.connectionLogs);
+    };
+    entry.connectionListeners.add(sync);
+    sync(); // catch up with anything that happened while no instance was mounted
+    return () => {
+      entry.connectionListeners.delete(sync);
+    };
+  }, [sessionId, isLocal]);
 
   // When tab becomes visible/focused after switching from another tab or view
   useEffect(() => {
@@ -956,7 +987,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               <span>Find in Terminal</span>
             </div>
             <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
-              {isMac ? "⌘F" : "Ctrl+F"}
+              {isMac ? "⌘F" : "Ctrl+Shift+F"}
             </span>
           </button>
 
@@ -1073,7 +1104,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
         </div>
       )}
 
-      {/* Floating Terminal Search Bar (Ctrl+F / Cmd+F) */}
+      {/* Floating Terminal Search Bar (Ctrl+Shift+F / Cmd+F) */}
       {isSearchOpen && (
         <TerminalSearchBar
           searchAddon={searchAddonRef.current}

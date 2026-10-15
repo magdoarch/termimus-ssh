@@ -23,6 +23,11 @@ interface TransferPlan {
 // Guard against symlink loops / pathological trees during recursive scans
 const MAX_TRAVERSAL_DEPTH = 32;
 
+// Latest-request tokens per pane: a slow listing that resolves after a newer
+// navigation must not overwrite the newer result.
+let localListSeq = 0;
+let remoteListSeq = 0;
+
 const joinPath = (dir: string, name: string) => `${dir.replace(/\/+$/, "")}/${name}`;
 
 const baseName = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
@@ -282,17 +287,21 @@ export const useSftpStore = create<SftpState>((set, get) => {
       if (get().localPath && get().localEntries.length > 0) {
         return;
       }
+      const seq = ++localListSeq;
       set({ localLoading: true, error: null });
       try {
         const home = await api.getLocalHomeDir();
         const entries = await api.listLocal(home);
+        if (seq !== localListSeq) return;
         set({ localPath: home, localEntries: entries, localLoading: false });
       } catch (e) {
+        if (seq !== localListSeq) return;
         set({ localLoading: false, error: `Local fs error: ${String(e)}` });
       }
     },
 
     navigateLocal: async (path: string) => {
+      const seq = ++localListSeq;
       set({
         localLoading: true,
         error: null,
@@ -301,8 +310,10 @@ export const useSftpStore = create<SftpState>((set, get) => {
       });
       try {
         const entries = await api.listLocal(path);
+        if (seq !== localListSeq) return;
         set({ localPath: path, localEntries: entries, localLoading: false });
       } catch (e) {
+        if (seq !== localListSeq) return;
         set({ localLoading: false, error: `Failed to open ${path}: ${String(e)}` });
       }
     },
@@ -397,6 +408,9 @@ export const useSftpStore = create<SftpState>((set, get) => {
       }
 
       const sessionId = `sftp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const seq = ++remoteListSeq;
+      // Another connect/disconnect replaced this session while we were waiting
+      const isStale = () => get().remoteSessionId !== sessionId;
       set({
         remoteLoading: true,
         remoteHost: host,
@@ -408,13 +422,20 @@ export const useSftpStore = create<SftpState>((set, get) => {
 
       try {
         const initialPath = await api.connectSftp(host.id, sessionId);
+        if (isStale()) {
+          // Nobody uses this connection anymore — don't leak it in the backend
+          api.disconnectSftp(sessionId).catch(() => {});
+          return;
+        }
         const entries = await api.listSftp(sessionId, initialPath);
+        if (isStale() || seq !== remoteListSeq) return;
         set({
           remotePath: initialPath,
           remoteEntries: entries,
           remoteLoading: false,
         });
       } catch (e) {
+        if (isStale()) return;
         set({
           remoteLoading: false,
           error: `SFTP Connection failed: ${String(e)}`,
@@ -426,6 +447,8 @@ export const useSftpStore = create<SftpState>((set, get) => {
     navigateRemote: async (path: string) => {
       const { remoteSessionId } = get();
       if (!remoteSessionId) return;
+      const seq = ++remoteListSeq;
+      const isStale = () => seq !== remoteListSeq || get().remoteSessionId !== remoteSessionId;
 
       set({
         remoteLoading: true,
@@ -435,8 +458,10 @@ export const useSftpStore = create<SftpState>((set, get) => {
       });
       try {
         const entries = await api.listSftp(remoteSessionId, path);
+        if (isStale()) return;
         set({ remotePath: path, remoteEntries: entries, remoteLoading: false });
       } catch (e) {
+        if (isStale()) return;
         set({ remoteLoading: false, error: `Remote list error: ${String(e)}` });
       }
     },
@@ -468,16 +493,19 @@ export const useSftpStore = create<SftpState>((set, get) => {
 
     disconnectRemote: async () => {
       const { remoteSessionId } = get();
-      if (remoteSessionId) {
-        await api.disconnectSftp(remoteSessionId);
-      }
+      // Clear state first so an in-flight connect sees it's stale and closes
+      // its own connection (the backend doesn't know that session yet).
       set({
         remoteHost: null,
         remoteSessionId: null,
         remoteEntries: [],
+        remoteLoading: false,
         selectedRemoteFiles: [],
         remoteAnchorPath: null,
       });
+      if (remoteSessionId) {
+        await api.disconnectSftp(remoteSessionId).catch(() => {});
+      }
     },
 
     uploadSelected: async (entries) => {

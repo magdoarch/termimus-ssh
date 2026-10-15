@@ -222,6 +222,90 @@ pub async fn authenticate_publickey_smart<H: russh::client::Handler>(
     Ok(res)
 }
 
+async fn authenticate(
+    handle: &mut Handle<SshClientHandler>,
+    username: &str,
+    auth: &SshAuth,
+) -> Result<bool, String> {
+    let res = match auth {
+        SshAuth::Password(password) => handle
+            .authenticate_password(username, password)
+            .await
+            .map_err(|e| format!("Auth error: {e}"))?,
+        SshAuth::PrivateKey { pem, passphrase } => {
+            let key_pair = decode_secret_key(pem, passphrase.as_deref())
+                .map_err(|e| format!("Invalid private key: {e}"))?;
+            authenticate_publickey_smart(handle, username, key_pair).await?
+        }
+    };
+    Ok(res.success())
+}
+
+/// Open an authenticated SSH connection to `address:port`, hopping through
+/// `jump` (ProxyJump) when the host is configured behind a bastion. Used by
+/// SFTP and tunnels; the terminal path (`do_connect`) does the same steps with
+/// progress events and cancel checkpoints. Both hops go through
+/// `SshClientHandler`, so TOFU host key verification applies to each.
+///
+/// Returns the target handle and the jump handle, which must be kept alive
+/// for as long as the target connection is in use.
+pub async fn connect_authenticated(
+    db: Arc<Database>,
+    address: &str,
+    port: u16,
+    username: &str,
+    auth: &SshAuth,
+    jump: Option<&JumpHostConfig>,
+) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
+    let (stream, jump_handle) = match jump {
+        Some(jump) => {
+            let jump_tcp = tokio::net::TcpStream::connect((jump.address.as_str(), jump.port))
+                .await
+                .map_err(|e| format!("Failed to reach Jump Host {}:{}: {e}", jump.address, jump.port))?;
+            configure_tcp_stream(&jump_tcp);
+            let jump_handler = SshClientHandler {
+                address: jump.address.clone(),
+                port: jump.port,
+                db: db.clone(),
+            };
+            let mut j_handle = client::connect_stream(default_client_config(), jump_tcp, jump_handler)
+                .await
+                .map_err(|e| format!("Jump Host handshake failed: {e}"))?;
+            if !authenticate(&mut j_handle, &jump.username, &jump.auth)
+                .await
+                .map_err(|e| format!("Jump Host {e}"))?
+            {
+                return Err("Jump Host authentication rejected by server".to_string());
+            }
+            let channel = j_handle
+                .channel_open_direct_tcpip(address.to_string(), port as u32, "127.0.0.1".to_string(), 0)
+                .await
+                .map_err(|e| format!("Failed to open tunnel through Jump Host to {address}:{port}: {e}"))?;
+            (SshStream::Tunneled(channel.into_stream()), Some(j_handle))
+        }
+        None => {
+            let tcp = tokio::net::TcpStream::connect((address, port))
+                .await
+                .map_err(|e| format!("TCP connection to {address}:{port} failed: {e}"))?;
+            configure_tcp_stream(&tcp);
+            (SshStream::Direct(tcp), None)
+        }
+    };
+
+    let handler = SshClientHandler {
+        address: address.to_string(),
+        port,
+        db,
+    };
+    let mut handle = client::connect_stream(default_client_config(), stream, handler)
+        .await
+        .map_err(|e| format!("SSH connection failed: {e}"))?;
+    if !authenticate(&mut handle, username, auth).await? {
+        return Err("Authentication rejected by server".to_string());
+    }
+    Ok((handle, jump_handle))
+}
+
 pub struct SshSession {
     pub id: String,
     handle: Handle<SshClientHandler>,
