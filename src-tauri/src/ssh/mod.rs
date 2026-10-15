@@ -24,6 +24,10 @@ mod auth_tests;
 /// server that keeps asking must not hang the connect forever.
 const MAX_KBD_INTERACTIVE_ROUNDS: usize = 10;
 
+/// Tries for a password or key passphrase typed at login (ssh's
+/// NumberOfPasswordPrompts).
+const SECRET_ATTEMPTS: usize = 3;
+
 /// Configures a `TcpStream` with low-latency (`TCP_NODELAY`) and socket-level
 /// TCP keepalive (15s idle probe, 5s retry interval) to prevent stateful NAT routers,
 /// middleboxes, and cloud VPC firewalls from terminating idle connections.
@@ -39,11 +43,43 @@ pub fn configure_tcp_stream(stream: &tokio::net::TcpStream) {
 /// Sends `keepalive@openssh.com` probes every 15 seconds to ensure sessions
 /// (interactive shells, long-running monitoring like btop/htop, SFTP, tunnels)
 /// never get dropped by remote servers or NAT translation timeouts.
-pub fn default_client_config() -> Arc<client::Config> {
+fn base_client_config() -> client::Config {
     let mut config = client::Config::default();
     config.keepalive_interval = Some(Duration::from_secs(15));
     config.keepalive_max = 4;
+    config
+}
+
+pub fn default_client_config() -> Arc<client::Config> {
+    Arc::new(base_client_config())
+}
+
+/// Client config for a connection to `address:port`. When a host key is
+/// already trusted for it, that key's algorithm goes first in the host-key
+/// preference list (as OpenSSH does), so the server presents the same kind of
+/// key we pinned — e.g. one imported from ~/.ssh/known_hosts — rather than a
+/// different type that would trip the "host key changed" check.
+pub fn client_config_for(db: &Database, address: &str, port: u16) -> Arc<client::Config> {
+    let mut config = base_client_config();
+    if let Ok(Some(known)) = db.get_known_host(address, port) {
+        config.preferred.key = std::borrow::Cow::Owned(prefer_host_key_algorithm(&config.preferred.key, &known.key_type));
+    }
     Arc::new(config)
+}
+
+fn prefer_host_key_algorithm(order: &[russh::keys::Algorithm], key_type: &str) -> Vec<russh::keys::Algorithm> {
+    use russh::keys::Algorithm;
+    let Ok(pinned) = Algorithm::new(key_type) else {
+        return order.to_vec();
+    };
+    // Every RSA signature variant (rsa-sha2-512/256, ssh-rsa) uses the same key.
+    let same_kind = |a: &Algorithm| matches!((&pinned, a), (Algorithm::Rsa { .. }, Algorithm::Rsa { .. })) || *a == pinned;
+    order
+        .iter()
+        .filter(|a| same_kind(a))
+        .chain(order.iter().filter(|a| !same_kind(a)))
+        .cloned()
+        .collect()
 }
 
 /// Progress payload emitted to the frontend during connection handshake.
@@ -166,6 +202,8 @@ impl Handler for SshClientHandler {
 #[derive(Clone)]
 pub enum SshAuth {
     Password(String),
+    /// No password saved for the host: ask for it at every login.
+    AskPassword,
     PrivateKey { pem: String, passphrase: Option<String> },
 }
 
@@ -309,28 +347,101 @@ pub(crate) async fn authenticate_with<P: AuthPrompter>(
     target: &str,
     prompter: &P,
 ) -> Result<bool, String> {
-    let first = match auth {
-        SshAuth::Password(password) => handle
-            .authenticate_password(username, password)
-            .await
-            .map_err(|e| format!("Auth error: {e}"))?,
+    // `password` answers a keyboard-interactive "Password:" prompt later on.
+    let (first, password) = match auth {
+        SshAuth::Password(password) => {
+            let result = handle
+                .authenticate_password(username, password)
+                .await
+                .map_err(|e| format!("Auth error: {e}"))?;
+            (result, Some(Zeroizing::new(password.clone())))
+        }
+        SshAuth::AskPassword => ask_password_login(handle, username, target, prompter).await?,
         SshAuth::PrivateKey { pem, passphrase } => {
-            let key_pair = decode_secret_key(pem, passphrase.as_deref())
-                .map_err(|e| format!("Invalid private key: {e}"))?;
-            authenticate_publickey_smart(handle, username, key_pair).await?
+            let key_pair = load_private_key(pem, passphrase.as_deref(), target, prompter).await?;
+            (authenticate_publickey_smart(handle, username, key_pair).await?, None)
         }
     };
     match first {
         AuthResult::Success => Ok(true),
         AuthResult::Failure { remaining_methods } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
-            let stored_password = match auth {
-                SshAuth::Password(password) => Some(Zeroizing::new(password.clone())),
-                SshAuth::PrivateKey { .. } => None,
-            };
-            keyboard_interactive(handle, username, stored_password, target, prompter).await
+            keyboard_interactive(handle, username, password, target, prompter).await
         }
         AuthResult::Failure { .. } => Ok(false),
     }
+}
+
+/// Ask the user for one hidden value; `None` from the prompter cancels the login.
+async fn ask_secret<P: AuthPrompter>(
+    prompter: &P,
+    target: &str,
+    title: &str,
+    instructions: &str,
+    label: &str,
+) -> Result<Zeroizing<String>, String> {
+    let request = AuthPromptRequest {
+        target: target.to_string(),
+        name: title.to_string(),
+        instructions: instructions.to_string(),
+        prompts: vec![PromptField { prompt: label.to_string(), echo: false }],
+    };
+    prompter
+        .ask(request)
+        .await
+        .and_then(|answers| answers.into_iter().next())
+        .map(Zeroizing::new)
+        .ok_or_else(|| "Authentication cancelled".to_string())
+}
+
+/// Password login for a host without a saved password. The user is only asked
+/// when the server takes the `password` method; one that takes passwords
+/// through keyboard-interactive alone asks with its own prompt afterwards.
+/// Returns the last password typed, for that keyboard-interactive round.
+async fn ask_password_login<P: AuthPrompter>(
+    handle: &mut Handle<SshClientHandler>,
+    username: &str,
+    target: &str,
+    prompter: &P,
+) -> Result<(AuthResult, Option<Zeroizing<String>>), String> {
+    let auth_error = |e: russh::Error| format!("Auth error: {e}");
+    let mut result = handle.authenticate_none(username).await.map_err(auth_error)?;
+    let mut typed = None;
+    for attempt in 0..SECRET_ATTEMPTS {
+        let AuthResult::Failure { remaining_methods } = &result else { break };
+        if !remaining_methods.contains(&MethodKind::Password) {
+            break;
+        }
+        let instructions = if attempt == 0 { "" } else { "Wrong password, try again." };
+        let password = ask_secret(prompter, target, "Password", instructions, "Password").await?;
+        result = handle
+            .authenticate_password(username, password.as_str())
+            .await
+            .map_err(auth_error)?;
+        typed = Some(password);
+    }
+    Ok((result, typed))
+}
+
+/// Decode a saved key. An encrypted key saved without its passphrase asks
+/// for it, like ssh does.
+async fn load_private_key<P: AuthPrompter>(
+    pem: &str,
+    passphrase: Option<&str>,
+    target: &str,
+    prompter: &P,
+) -> Result<russh::keys::PrivateKey, String> {
+    match decode_secret_key(pem, passphrase) {
+        Err(e) if passphrase.is_none() && crate::sshkey::is_missing_passphrase(pem, &e) => {}
+        decoded => return decoded.map_err(|e| format!("Invalid private key: {e}")),
+    }
+    for attempt in 0..SECRET_ATTEMPTS {
+        let instructions = if attempt == 0 { "The private key is encrypted." } else { "Wrong passphrase, try again." };
+        let typed = ask_secret(prompter, target, "Key passphrase", instructions, "Passphrase").await?;
+        if let Ok(key) = decode_secret_key(pem, Some(typed.as_str())) {
+            return Ok(key);
+        }
+    }
+    Err("Wrong passphrase for the private key".to_string())
 }
 
 async fn keyboard_interactive<P: AuthPrompter>(
@@ -403,13 +514,14 @@ pub async fn open_transport(
                 .await
                 .map_err(|e| format!("Failed to reach Jump Host {}:{}: {e}", jump.address, jump.port))?;
             configure_tcp_stream(&jump_tcp);
+            let jump_config = client_config_for(&db, &jump.address, jump.port);
             let jump_handler = SshClientHandler {
                 address: jump.address.clone(),
                 port: jump.port,
                 db,
                 forwarded_tcpip: None,
             };
-            let mut j_handle = client::connect_stream(default_client_config(), jump_tcp, jump_handler)
+            let mut j_handle = client::connect_stream(jump_config, jump_tcp, jump_handler)
                 .await
                 .map_err(|e| format!("Jump Host handshake failed: {e}"))?;
             let jump_target = format!("{}@{} (jump host)", jump.username, jump.address);
@@ -468,13 +580,14 @@ pub async fn connect_authenticated_with_forwarding(
 ) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
     let (stream, jump_handle) = open_transport(db.clone(), address, port, jump).await?;
 
+    let config = client_config_for(&db, address, port);
     let handler = SshClientHandler {
         address: address.to_string(),
         port,
         db,
         forwarded_tcpip,
     };
-    let mut handle = client::connect_stream(default_client_config(), stream, handler)
+    let mut handle = client::connect_stream(config, stream, handler)
         .await
         .map_err(|e| format!("SSH connection failed: {e}"))?;
     if !authenticate(&mut handle, username, auth, &format!("{username}@{address}")).await? {
@@ -633,7 +746,7 @@ impl SessionManager {
 
             self.check_cancelled(&session_id).await?;
 
-            let jump_config = default_client_config();
+            let jump_config = client_config_for(&db, &jump.address, jump.port);
             let jump_handler = SshClientHandler {
                 address: jump.address.clone(),
                 port: jump.port,
@@ -710,7 +823,7 @@ impl SessionManager {
         };
 
         // ── 2. Target SSH Handshake over the stream ──
-        let config = default_client_config();
+        let config = client_config_for(&db, &address, port);
         let handler = SshClientHandler {
             address: address.clone(),
             port,
@@ -1103,6 +1216,23 @@ pub async fn detect_os_via_exec(app: &AppHandle, db: Arc<Database>, session: Wea
 #[cfg(test)]
 mod tests {
     use tokio::io::{AsyncRead, AsyncWrite};
+
+    #[test]
+    fn pinned_host_key_algorithm_is_negotiated_first() {
+        use russh::keys::Algorithm;
+        let default = super::base_client_config().preferred.key.to_vec();
+        assert_eq!(default[0], Algorithm::Ed25519);
+
+        let ecdsa = super::prefer_host_key_algorithm(&default, "ecdsa-sha2-nistp256");
+        assert_eq!(ecdsa[0].as_str(), "ecdsa-sha2-nistp256");
+        assert_eq!(ecdsa.len(), default.len());
+
+        // A pinned RSA key moves every RSA signature variant up front.
+        let rsa = super::prefer_host_key_algorithm(&default, "ssh-rsa");
+        assert!(rsa[..3].iter().all(|a| matches!(a, Algorithm::Rsa { .. })));
+
+        assert_eq!(super::prefer_host_key_algorithm(&default, "bogus"), default);
+    }
 
     fn _assert_stream<T: AsyncRead + AsyncWrite + Unpin + Send + 'static>() {}
 

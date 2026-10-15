@@ -557,17 +557,17 @@ fn resolve_host_auth(state: &AppState, host: &Host) -> Result<SshAuth, String> {
     }
     match host.auth_method.as_str() {
         "password" => {
-            let secret = if let Some(cred_id) = &host.credential_id {
-                let cred = state
-                    .db
-                    .get_credential(cred_id)
-                    .map_err(|e| e.to_string())?
-                    .ok_or_else(|| "Credential record not found".to_string())?;
-                let bytes = state.vault.decrypt(&cred.ciphertext, &cred.nonce)?;
-                String::from_utf8(bytes).map_err(|e| format!("Invalid utf-8 password: {e}"))?
-            } else {
-                return Err("No password configured for this host".to_string());
+            // No saved password: the user is asked for it at login.
+            let Some(cred_id) = &host.credential_id else {
+                return Ok(SshAuth::AskPassword);
             };
+            let cred = state
+                .db
+                .get_credential(cred_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| "Credential record not found".to_string())?;
+            let bytes = state.vault.decrypt(&cred.ciphertext, &cred.nonce)?;
+            let secret = String::from_utf8(bytes).map_err(|e| format!("Invalid utf-8 password: {e}"))?;
             Ok(SshAuth::Password(secret))
         }
         "private_key" => {
@@ -1450,6 +1450,36 @@ pub fn known_host_delete(
     port: u16,
 ) -> Result<(), String> {
     state.db.delete_known_host(&address, port).map_err(|e| e.to_string())
+}
+
+// ================= SSH CONFIG IMPORT =================
+
+/// Hosts, keys and known host keys an import of `path` (default
+/// `~/.ssh/config`) would bring in. Reads only; nothing is saved.
+#[tauri::command]
+pub async fn ssh_config_preview(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<crate::sshconfig::import::ImportPreview, String> {
+    run_blocking_with_state(&state, move |state| {
+        let home = dirs::home_dir().ok_or("Could not find your home directory")?;
+        crate::sshconfig::import::preview(&state.db, &home, path.as_deref())
+    })
+    .await
+}
+
+/// Import the chosen config hosts with their keys, jump hosts and known
+/// host keys. Key passphrases are checked (bcrypt) off the main thread.
+#[tauri::command]
+pub async fn ssh_config_import(
+    state: State<'_, AppState>,
+    request: crate::sshconfig::import::ImportRequest,
+) -> Result<crate::sshconfig::import::ImportResult, String> {
+    run_blocking_with_state(&state, move |state| {
+        let home = dirs::home_dir().ok_or("Could not find your home directory")?;
+        crate::sshconfig::import::import(&state.db, &state.vault, &home, &request)
+    })
+    .await
 }
 
 // ================= BACKUP & RESTORE COMMANDS =================
