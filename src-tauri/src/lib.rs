@@ -1,6 +1,7 @@
 pub mod biometric;
 pub mod commands;
 pub mod db;
+pub mod hostinfo;
 pub mod pty;
 pub mod remote;
 pub mod sftp;
@@ -31,8 +32,9 @@ pub fn run() {
     let pty = Arc::new(PtyManager::new());
     let remote = Arc::new(RemoteDesktopManager::new());
     let pool = Arc::new(ssh::ConnectionPool::new());
+    let monitor = Arc::new(hostinfo::HostMonitor::default());
 
-    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool };
+    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool, monitor };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -132,6 +134,8 @@ pub fn run() {
             commands::totp_preview,
             commands::host_totp_code,
             commands::ssh_install_public_key,
+            commands::host_monitor_start,
+            commands::host_monitor_stop,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")
