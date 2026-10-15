@@ -33,8 +33,9 @@ pub fn run() {
     let remote = Arc::new(RemoteDesktopManager::new());
     let pool = Arc::new(ssh::ConnectionPool::new());
     let monitor = Arc::new(hostinfo::HostMonitor::default());
+    let leases = Arc::new(hostinfo::ConnectionLeases::default());
 
-    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool, monitor };
+    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool, monitor, leases };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -136,6 +137,12 @@ pub fn run() {
             commands::ssh_install_public_key,
             commands::host_monitor_start,
             commands::host_monitor_stop,
+            commands::host_connection_hold,
+            commands::host_connection_release,
+            commands::docker_list,
+            commands::docker_stats,
+            commands::docker_action,
+            commands::docker_logs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")

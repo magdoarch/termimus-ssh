@@ -23,6 +23,7 @@ import {
   ShieldCheck,
   KeyRound,
   Gauge,
+  Container,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useHostStore } from "../../stores/useHostStore";
@@ -862,6 +863,18 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 >
                   <Gauge size={13} />
                   <span>Server Dashboard</span>
+                </button>
+              )}
+              {isSshHost(contextMenu.host!) && (
+                <button
+                  onClick={() => {
+                    useHostPanelStore.getState().open(contextMenu.host!.id, "docker");
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <Container size={13} />
+                  <span>Docker Containers</span>
                 </button>
               )}
 

@@ -49,6 +49,29 @@ export interface HostStatsEvent {
   error: string | null;
 }
 
+/** A container from `docker ps -a` (see hostinfo::docker) */
+export interface DockerContainer {
+  id: string;
+  name: string;
+  image: string;
+  command: string;
+  state: "running" | "exited" | "paused" | "created" | "restarting" | "dead" | string;
+  status: string;
+  ports: string;
+  createdAt: string;
+}
+
+export interface DockerContainerStats {
+  id: string;
+  cpuPercent: string;
+  memUsage: string;
+  memPercent: string;
+  netIo: string;
+  blockIo: string;
+}
+
+export type DockerAction = "start" | "stop" | "restart" | "pause" | "unpause" | "remove";
+
 /** A current one-time code (see ssh::totp) */
 export interface TotpCode {
   code: string;
@@ -413,12 +436,14 @@ export const api = {
   deleteFolder: (id: string) => invoke<void>("folder_delete", { id }),
 
   // SSH Sessions
+  /** `command` runs instead of the login shell (still with a PTY) */
   connectSsh: (
     hostId: string,
     sessionId: string,
     cols: number,
     rows: number,
-  ) => invoke<void>("ssh_connect", { hostId, sessionId, cols, rows }),
+    command?: string,
+  ) => invoke<void>("ssh_connect", { hostId, sessionId, cols, rows, command: command ?? null }),
   writeSsh: (sessionId: string, data: number[]) =>
     invoke<void>("ssh_write", { sessionId, data }),
   resizeSsh: (sessionId: string, cols: number, rows: number) =>
@@ -605,6 +630,21 @@ export const api = {
   startHostMonitor: (hostId: string, monitorId: string, intervalSecs = 3) =>
     invoke<void>("host_monitor_start", { hostId, monitorId, intervalSecs }),
   stopHostMonitor: (monitorId: string) => invoke<void>("host_monitor_stop", { monitorId }),
+
+  /** Keep the host's SSH connection open while a panel is shown */
+  holdHostConnection: (hostId: string, leaseId: string) =>
+    invoke<void>("host_connection_hold", { hostId, leaseId }),
+  releaseHostConnection: (leaseId: string) => invoke<void>("host_connection_release", { leaseId }),
+
+  // Docker over the host's connection; `sudo` comes from dockerList
+  dockerList: (hostId: string) =>
+    invoke<{ containers: DockerContainer[]; sudo: boolean }>("docker_list", { hostId }),
+  dockerStats: (hostId: string, sudo: boolean) =>
+    invoke<DockerContainerStats[]>("docker_stats", { hostId, sudo }),
+  dockerAction: (hostId: string, containerId: string, action: DockerAction, sudo: boolean) =>
+    invoke<void>("docker_action", { hostId, containerId, action, sudo }),
+  dockerLogs: (hostId: string, containerId: string, tail: number, sudo: boolean) =>
+    invoke<string>("docker_logs", { hostId, containerId, tail, sudo }),
 
   /** ssh-copy-id: add a Keychain key's public half to the host's authorized_keys */
   installPublicKey: (hostId: string, credentialId: string) =>

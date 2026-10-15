@@ -28,6 +28,8 @@ pub struct AppState {
     pub pool: Arc<ConnectionPool>,
     /// Server dashboards: stats sampled over the host's connection.
     pub monitor: Arc<crate::hostinfo::HostMonitor>,
+    /// Connections held open while a host panel is shown.
+    pub leases: Arc<crate::hostinfo::ConnectionLeases>,
 }
 
 /// Minimum master password length for new or changed vault passwords.
@@ -846,6 +848,74 @@ pub async fn host_monitor_stop(state: State<'_, AppState>, monitor_id: String) -
     Ok(())
 }
 
+/// The host's (shared) SSH connection, logging in if none is open.
+async fn host_connection(state: &AppState, host_id: &str) -> Result<Arc<crate::ssh::SshConnection>, String> {
+    let host = state
+        .db
+        .get_host(host_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Host not found".to_string())?;
+    let route = ssh_route(state, &host)?;
+    let quiet = |_: u8, _: &str, _: &str| {};
+    Ok(state.pool.connect(&state.db, &route, &quiet).await?.0)
+}
+
+/// Keep the host's connection open until released (a panel is showing), so
+/// the panel's calls don't log in again each time.
+#[tauri::command]
+pub async fn host_connection_hold(state: State<'_, AppState>, host_id: String, lease_id: String) -> Result<(), String> {
+    let connection = host_connection(&state, &host_id).await?;
+    state.leases.hold(lease_id, connection).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn host_connection_release(state: State<'_, AppState>, lease_id: String) -> Result<(), String> {
+    state.leases.release(&lease_id).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn docker_list(state: State<'_, AppState>, host_id: String) -> Result<crate::hostinfo::docker::ContainerList, String> {
+    let connection = host_connection(&state, &host_id).await?;
+    crate::hostinfo::docker::list(&connection).await
+}
+
+#[tauri::command]
+pub async fn docker_stats(
+    state: State<'_, AppState>,
+    host_id: String,
+    sudo: bool,
+) -> Result<Vec<crate::hostinfo::docker::ContainerStats>, String> {
+    let connection = host_connection(&state, &host_id).await?;
+    crate::hostinfo::docker::stats(&connection, sudo).await
+}
+
+/// start, stop, restart, pause, unpause or remove a container.
+#[tauri::command]
+pub async fn docker_action(
+    state: State<'_, AppState>,
+    host_id: String,
+    container_id: String,
+    action: String,
+    sudo: bool,
+) -> Result<(), String> {
+    let connection = host_connection(&state, &host_id).await?;
+    crate::hostinfo::docker::action(&connection, &container_id, &action, sudo).await
+}
+
+#[tauri::command]
+pub async fn docker_logs(
+    state: State<'_, AppState>,
+    host_id: String,
+    container_id: String,
+    tail: u32,
+    sudo: bool,
+) -> Result<String, String> {
+    let connection = host_connection(&state, &host_id).await?;
+    crate::hostinfo::docker::logs(&connection, &container_id, tail, sudo).await
+}
+
 /// Settings: share one SSH connection per host (on by default).
 #[tauri::command]
 pub fn ssh_set_connection_sharing(state: State<AppState>, enabled: bool) {
@@ -860,6 +930,7 @@ pub async fn ssh_connect(
     session_id: String,
     cols: u16,
     rows: u16,
+    command: Option<String>,
 ) -> Result<(), String> {
     let host = state
         .db
@@ -880,6 +951,7 @@ pub async fn ssh_connect(
             route,
             cols,
             rows,
+            command.filter(|c| !c.trim().is_empty()),
         )
         .await;
 

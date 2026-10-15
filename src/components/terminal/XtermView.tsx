@@ -23,6 +23,7 @@ import {
   Check,
   Search,
   Gauge,
+  Container,
 } from "lucide-react";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../stores/useSessionStore";
@@ -535,7 +536,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
       setLogs([initialLog]);
 
       api
-        .connectSsh(hostId, sessionId, cols, rows)
+        .connectSsh(hostId, sessionId, cols, rows, useSessionStore.getState().tabs.find((t) => t.id === sessionId)?.command)
         .then(() => {
           const entry = terminalPool.get(sessionId);
           if (entry) {
@@ -1062,6 +1063,16 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               >
                 <Gauge size={13} />
                 <span>Server Dashboard</span>
+              </button>
+              <button
+                onClick={() => {
+                  useHostPanelStore.getState().open(hostId, "docker");
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors"
+              >
+                <Container size={13} />
+                <span>Docker Containers</span>
               </button>
             </>
           )}
