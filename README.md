@@ -171,7 +171,7 @@ docker run -d \
   --name termimus-sync \
   -p 8080:8080 \
   -v termimus_data:/data \
-  -e TERMIMUS_AUTH_TOKEN="your-secure-random-token" \
+  -e TERMIMUS_AUTH_TOKEN="$(openssl rand -hex 32)" \
   --restart unless-stopped \
   ghcr.io/termimus/termimus-sync:latest
 ```
@@ -191,12 +191,14 @@ services:
     environment:
       - PORT=8080
       - DB_PATH=/data/sync.db
-      - TERMIMUS_AUTH_TOKEN=your-secure-random-token
+      - TERMIMUS_AUTH_TOKEN=${TERMIMUS_AUTH_TOKEN:?Set TERMIMUS_AUTH_TOKEN}
 ```
 Run with:
 ```bash
+echo "TERMIMUS_AUTH_TOKEN=$(openssl rand -hex 32)" > .env
 docker compose up -d
 ```
+The server refuses to start without `TERMIMUS_AUTH_TOKEN`.
 
 #### Option C: Run from Source (Go)
 ```bash

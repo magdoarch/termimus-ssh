@@ -33,6 +33,7 @@ interface SyncState {
   setDeviceName: (name: string) => void;
   getDeviceId: () => string;
   setAutoSync: (enabled: boolean) => void;
+  loadSecrets: () => Promise<void>;
 
   testConnection: () => Promise<{ ok: boolean; version?: string; revision?: number; error?: string }>;
   push: () => Promise<number>;
@@ -42,6 +43,10 @@ interface SyncState {
 }
 
 let autoPushTimer: ReturnType<typeof setTimeout> | null = null;
+let saveSecretsTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Secrets found in a pre-v1 localStorage entry, moved to the OS keyring on startup
+let legacySecrets: { authToken: string; syncPassword: string } | null = null;
 
 function getDefaultDeviceName() {
   const platform = navigator.userAgent.includes("Linux")
@@ -70,8 +75,14 @@ export const useSyncStore = create<SyncState>()(
       lastError: null,
 
       setServerUrl: (url) => set({ serverUrl: url }),
-      setAuthToken: (token) => set({ authToken: token.trim() }),
-      setSyncPassword: (pw) => set({ syncPassword: pw }),
+      setAuthToken: (token) => {
+        set({ authToken: token.trim() });
+        scheduleSaveSecrets();
+      },
+      setSyncPassword: (pw) => {
+        set({ syncPassword: pw });
+        scheduleSaveSecrets();
+      },
       setDeviceName: (name) => set({ deviceName: name.trim() }),
       getDeviceId: () => {
         let id = get().deviceId;
@@ -90,6 +101,27 @@ export const useSyncStore = create<SyncState>()(
           return;
         }
         set({ autoSync });
+      },
+
+      loadSecrets: async () => {
+        if (legacySecrets) {
+          const legacy = legacySecrets;
+          legacySecrets = null;
+          set(legacy);
+          try {
+            await api.syncSecretsSave(legacy.authToken, legacy.syncPassword);
+          } catch (e) {
+            set({ lastError: `${String(e)}. Sync secrets are kept in memory only and must be re-entered after restart.` });
+          }
+          return;
+        }
+        try {
+          const secrets = await api.syncSecretsLoad();
+          if (secrets) set({ authToken: secrets.authToken, syncPassword: secrets.syncPassword });
+        } catch (e) {
+          console.warn("[Sync] Could not load secrets from OS keyring:", e);
+          if (get().serverUrl) set({ lastError: String(e) });
+        }
       },
 
       testConnection: async () => {
@@ -230,6 +262,48 @@ export const useSyncStore = create<SyncState>()(
     }),
     {
       name: "termimus_sync_config",
+      version: 1,
+      // Secrets go to the OS keyring (see loadSecrets/scheduleSaveSecrets), and
+      // transient status must not survive a restart, so only persist config.
+      partialize: (state) => ({
+        serverUrl: state.serverUrl,
+        deviceName: state.deviceName,
+        deviceId: state.deviceId,
+        autoSync: state.autoSync,
+        lastSyncAt: state.lastSyncAt,
+        latestServerVersion: state.latestServerVersion,
+      }),
+      migrate: (persisted, version) => {
+        const old = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 1) {
+          const authToken = typeof old.authToken === "string" ? old.authToken : "";
+          const syncPassword = typeof old.syncPassword === "string" ? old.syncPassword : "";
+          if (authToken || syncPassword) legacySecrets = { authToken, syncPassword };
+          delete old.authToken;
+          delete old.syncPassword;
+          delete old.syncStatus;
+          delete old.lastError;
+        }
+        return old as unknown as SyncState;
+      },
+      onRehydrateStorage: () => (state) => {
+        void state?.loadSecrets();
+      },
     }
   )
 );
+
+function scheduleSaveSecrets() {
+  if (saveSecretsTimer) clearTimeout(saveSecretsTimer);
+  saveSecretsTimer = setTimeout(async () => {
+    saveSecretsTimer = null;
+    const { authToken, syncPassword } = useSyncStore.getState();
+    try {
+      await api.syncSecretsSave(authToken, syncPassword);
+    } catch (e) {
+      useSyncStore.setState({
+        lastError: `${String(e)}. Sync secrets are kept in memory only and must be re-entered after restart.`,
+      });
+    }
+  }, 500);
+}

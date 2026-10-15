@@ -66,7 +66,12 @@ impl Handler for SshClientHandler {
         let key_type = server_public_key.algorithm().to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
-        let existing = self.db.get_known_host(&self.address, self.port).ok().flatten();
+        // Fail closed: a DB error must never be treated as "host never seen",
+        // otherwise the presented (possibly attacker) key would get pinned.
+        let existing = self
+            .db
+            .get_known_host(&self.address, self.port)
+            .map_err(|e| anyhow::anyhow!("Could not read known hosts to verify the server key: {e}"))?;
 
         match existing {
             None => {
@@ -79,7 +84,11 @@ impl Handler for SshClientHandler {
                     first_seen_at: now.clone(),
                     last_seen_at: now,
                 };
-                let _ = self.db.save_known_host(&entry);
+                // If we can't pin the key, don't proceed: the next connection
+                // would silently TOFU again and accept whatever key it sees.
+                self.db
+                    .save_known_host(&entry)
+                    .map_err(|e| anyhow::anyhow!("Could not save the server key to known hosts: {e}"))?;
                 Ok(true)
             }
             Some(known) if known.fingerprint == fingerprint => {

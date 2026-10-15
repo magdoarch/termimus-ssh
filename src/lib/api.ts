@@ -378,15 +378,21 @@ export const api = {
       deviceName,
       authToken: authToken?.trim() || null,
     }),
-  syncPull: (serverUrl: string, syncPassword: string, authToken?: string) =>
+  syncPull: (serverUrl: string, syncPassword: string, authToken?: string, replaceAll = false) =>
     invoke<ImportSummary>("sync_pull", {
       serverUrl,
       syncPassword,
       authToken: authToken?.trim() || null,
+      replaceAll,
     }),
   syncGetDevices: (serverUrl: string, authToken?: string) =>
     invoke<ConnectedDevice[]>("sync_get_devices", {
       serverUrl,
       authToken: authToken?.trim() || null,
     }),
+  // Sync auth token + E2EE passphrase, kept in the OS keyring
+  syncSecretsSave: (authToken: string, syncPassword: string) =>
+    invoke<void>("sync_secrets_save", { authToken, syncPassword }),
+  syncSecretsLoad: () =>
+    invoke<{ authToken: string; syncPassword: string } | null>("sync_secrets_load"),
 };

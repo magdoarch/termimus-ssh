@@ -144,6 +144,13 @@ impl SftpManager {
             if name == "." || name == ".." {
                 continue;
             }
+            // A READDIR name is a single path component; anything containing a
+            // separator or NUL is a malicious/broken server trying to make a
+            // recursive download escape the chosen local directory.
+            if name.is_empty() || name.contains('/') || name.contains('\0') {
+                eprintln!("[sftp] skipping invalid entry name from server: {name:?}");
+                continue;
+            }
             let file_type = entry.file_type();
             let is_dir = file_type.is_dir();
             let metadata = entry.metadata();

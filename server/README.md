@@ -20,7 +20,7 @@ docker run -d \
   --name termimus-sync \
   -p 8080:8080 \
   -v termimus_data:/data \
-  -e TERMIMUS_AUTH_TOKEN="your-secure-random-secret-token" \
+  -e TERMIMUS_AUTH_TOKEN="$(openssl rand -hex 32)" \
   --restart unless-stopped \
   ghcr.io/termimus/termimus-sync:latest
 ```
@@ -29,6 +29,7 @@ docker run -d \
 
 ```bash
 cd server
+echo "TERMIMUS_AUTH_TOKEN=$(openssl rand -hex 32)" > .env
 docker compose up -d
 ```
 
@@ -52,7 +53,8 @@ go run ./cmd/server
 | `PORT` | `8080` | HTTP & WebSocket port to listen on |
 | `DATA_DIR` | `./data` | Directory where SQLite database is stored |
 | `DB_PATH` | `./data/sync.db` | Exact path to the SQLite database file |
-| `TERMIMUS_AUTH_TOKEN` | `""` | Bearer token required to sync. If empty, runs in open mode. |
+| `TERMIMUS_AUTH_TOKEN` | — | **Required.** Bearer token clients must send. Use a long random value (`openssl rand -hex 32`); the server refuses to start without one. |
+| `TERMIMUS_ALLOW_OPEN_MODE` | — | Set to `1` to run without a token. Local testing only: anyone who can reach the port can overwrite your sync data. |
 
 ---
 

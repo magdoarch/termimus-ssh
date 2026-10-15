@@ -155,30 +155,9 @@ export function VaultModal() {
 
     setSubmitting(true);
     try {
-      const headers: HeadersInit = {};
-      if (syncAuthToken.trim()) {
-        headers["Authorization"] = `Bearer ${syncAuthToken.trim()}`;
-      }
-
-      const res = await fetch(`${cleanUrl}/api/v1/sync/bundle`, { headers });
-      if (!res.ok) {
-        if (res.status === 401) {
-          throw new Error("Authentication failed: invalid or missing Auth Token (configured via TERMIMUS_AUTH_TOKEN on your server).");
-        }
-        if (res.status === 404) {
-          throw new Error("No sync data found on server. Please push from your original device first.");
-        }
-        const errBody = await res.json().catch(() => ({}));
-        throw new Error(errBody.error || `Sync server returned HTTP ${res.status}`);
-      }
-
-      const data = await res.json();
-      if (!data.encrypted_blob) {
-        throw new Error("Received empty sync bundle from server");
-      }
-
-      // Import into local database with replace_all = true so vault salt and verifiers are adopted
-      await api.importBackup(data.encrypted_blob, true, syncPassphrase.trim());
+      // Native Rust HTTP pull (CSP blocks webview fetch to arbitrary hosts).
+      // replace_all = true so vault salt and verifiers are adopted.
+      await api.syncPull(cleanUrl, syncPassphrase.trim(), syncAuthToken.trim(), true);
 
       // Save sync configuration
       const syncStore = useSyncStore.getState();
@@ -189,7 +168,7 @@ export function VaultModal() {
       useSyncStore.setState({
         syncStatus: "connected",
         lastSyncAt: new Date().toISOString(),
-        latestServerVersion: data.version,
+        latestServerVersion: null,
         lastError: null,
       });
 
