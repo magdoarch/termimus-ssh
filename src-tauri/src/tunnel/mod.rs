@@ -545,9 +545,8 @@ async fn pipe(mut channel: Channel<Msg>, mut stream: TcpStream) {
 
     // Let the server send CLOSE (russh answers it) instead of closing first:
     // if we CLOSE while the server is still acknowledging our data, its late
-    // WINDOW_ADJUST makes russh 0.50 fail with WrongChannel and drop the whole
-    // SSH connection, killing every other connection of the tunnel (russh
-    // 0.54 and later ignore it). The server never sends anything after CLOSE.
+    // WINDOW_ADJUST made russh before 0.54 fail with WrongChannel and drop the
+    // whole SSH connection. The server never sends anything after its CLOSE.
     if !local_eof {
         let _ = channel.eof().await;
     }

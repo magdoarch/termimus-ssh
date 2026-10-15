@@ -54,7 +54,7 @@ impl server::Handler for TestServer {
     type Error = anyhow::Error;
 
     async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject { proceed_with_methods: self.offered_methods() })
+        Ok(Auth::Reject { proceed_with_methods: self.offered_methods(), partial_success: false })
     }
 
     // Unless `password_method` is set, the plain password method is disabled
@@ -63,8 +63,8 @@ impl server::Handler for TestServer {
     async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
         match self.policy.password_method {
             Some(expected) if expected == password => Ok(Auth::Accept),
-            Some(_) => Ok(Auth::Reject { proceed_with_methods: self.offered_methods() }),
-            None => Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive() }),
+            Some(_) => Ok(Auth::Reject { proceed_with_methods: self.offered_methods(), partial_success: false }),
+            None => Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive(), partial_success: false }),
         }
     }
 
@@ -73,9 +73,9 @@ impl server::Handler for TestServer {
             Ok(Auth::Accept)
         } else if self.policy.first_factor_key.as_ref() == Some(key) {
             // First factor done; the client must continue with keyboard-interactive.
-            Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive() })
+            Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive(), partial_success: true })
         } else {
-            Ok(Auth::Reject { proceed_with_methods: None })
+            Ok(Auth::Reject { proceed_with_methods: None, partial_success: false })
         }
     }
 
@@ -97,7 +97,7 @@ impl server::Handler for TestServer {
         }
         if prompts.is_empty() {
             // Nothing configured to ask: keyboard-interactive isn't a way in.
-            return Ok(Auth::Reject { proceed_with_methods: None });
+            return Ok(Auth::Reject { proceed_with_methods: None, partial_success: false });
         }
         match response {
             None => Ok(Auth::Partial {
@@ -110,7 +110,7 @@ impl server::Handler for TestServer {
                 if answers == expected {
                     Ok(Auth::Accept)
                 } else {
-                    Ok(Auth::Reject { proceed_with_methods: None })
+                    Ok(Auth::Reject { proceed_with_methods: None, partial_success: false })
                 }
             }
         }

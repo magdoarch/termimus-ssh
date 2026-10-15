@@ -19,6 +19,8 @@ use zeroize::Zeroizing;
 pub mod auth_prompt;
 #[cfg(test)]
 mod auth_tests;
+#[cfg(test)]
+pub(crate) mod e2e_tests;
 
 /// Keyboard-interactive rounds allowed per login: PAM stacks ask a few, a
 /// server that keeps asking must not hang the connect forever.
@@ -297,12 +299,13 @@ pub async fn authenticate_publickey_smart<H: russh::client::Handler>(
         .map_err(|e| format!("Auth error: {e}"))?;
 
     // Retry other RSA signature hashes only while the server still offers
-    // publickey: if it doesn't, the key was accepted as a first factor
-    // (e.g. `AuthenticationMethods publickey,keyboard-interactive`) or
-    // publickey is disabled, and retrying can't help.
+    // publickey: if it doesn't, or the key was accepted as a first factor
+    // (e.g. `AuthenticationMethods publickey,keyboard-interactive`), or
+    // publickey is disabled, retrying can't help.
     let still_offers_publickey = matches!(
         &res,
-        AuthResult::Failure { remaining_methods } if remaining_methods.contains(&MethodKind::PublicKey)
+        AuthResult::Failure { remaining_methods, partial_success: false }
+            if remaining_methods.contains(&MethodKind::PublicKey)
     );
     if is_rsa && still_offers_publickey {
         for fallback in [Some(HashAlg::Sha256), Some(HashAlg::Sha512), None] {
@@ -364,7 +367,7 @@ pub(crate) async fn authenticate_with<P: AuthPrompter>(
     };
     match first {
         AuthResult::Success => Ok(true),
-        AuthResult::Failure { remaining_methods } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
+        AuthResult::Failure { remaining_methods, .. } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
             keyboard_interactive(handle, username, password, target, prompter).await
         }
         AuthResult::Failure { .. } => Ok(false),
@@ -407,7 +410,7 @@ async fn ask_password_login<P: AuthPrompter>(
     let mut result = handle.authenticate_none(username).await.map_err(auth_error)?;
     let mut typed = None;
     for attempt in 0..SECRET_ATTEMPTS {
-        let AuthResult::Failure { remaining_methods } = &result else { break };
+        let AuthResult::Failure { remaining_methods, .. } = &result else { break };
         if !remaining_methods.contains(&MethodKind::Password) {
             break;
         }
@@ -1196,8 +1199,8 @@ pub async fn detect_os_via_exec(app: &AppHandle, db: Arc<Database>, session: Wea
             }
         }
         // The channel isn't closed from our side: the server closes it when
-        // the command exits (closing first can race with its late window
-        // adjusts, which makes russh 0.50 drop the whole connection).
+        // the command exits (closing first raced with its late window
+        // adjusts, which dropped the whole connection before russh 0.54).
         Ok::<_, String>(parse_os_release(&output))
     })
     .await;
