@@ -9,10 +9,12 @@ import {
   Check,
   Pencil,
   Trash2,
+  Upload,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useKeychainStore } from "../../stores/useKeychainStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
+import { useInstallKeyStore } from "../../stores/useInstallKeyStore";
 import { KeychainItem } from "../../lib/api";
 import { KeyModal } from "./KeyModal";
 import { IdentityModal } from "./IdentityModal";
@@ -283,6 +285,19 @@ export function KeychainView() {
                 >
                   <Copy size={13} />
                   <span>Copy Public Key</span>
+                </button>
+              )}
+
+              {contextMenu.item.public_key && contextMenu.item.kind !== "password" && (
+                <button
+                  onClick={() => {
+                    useInstallKeyStore.getState().open({ credentialId: contextMenu.item!.id });
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <Upload size={13} />
+                  <span>Install on Host…</span>
                 </button>
               )}
 

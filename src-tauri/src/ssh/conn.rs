@@ -458,6 +458,30 @@ async fn open(
     })
 }
 
+/// Adds the public key read from stdin to `~/.ssh/authorized_keys` unless it
+/// is there already (same key data, any comment), like `ssh-copy-id`: new
+/// files get private permissions, a last line without a newline is ended
+/// first, and SELinux labels are restored where that applies. Prints
+/// "already" or "added". POSIX sh, wrapped so any login shell can run it.
+pub const INSTALL_PUBLIC_KEY_SCRIPT: &str = r#"umask 077
+key=$(cat)
+data=$(printf "%s" "$key" | awk "{print \$2}")
+[ -n "$data" ] || { echo "not a public key" >&2; exit 2; }
+mkdir -p "$HOME/.ssh" || exit 1
+f="$HOME/.ssh/authorized_keys"
+touch "$f" || exit 1
+if grep -qF "$data" "$f"; then echo already; exit 0; fi
+if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo >> "$f"; fi
+printf "%s
+" "$key" >> "$f" || exit 1
+command -v restorecon >/dev/null 2>&1 && restorecon -F "$HOME/.ssh" "$f" >/dev/null 2>&1
+echo added"#;
+
+/// The shell command running `script` with `sh`, whatever the login shell.
+pub fn sh_command(script: &str) -> String {
+    format!("sh -c '{}'", script.replace('\'', "'\\''"))
+}
+
 /// A byte stream to `address:port`, through the end of `jump_route` when it
 /// isn't empty (VNC and RDP behind a bastion). The connection returned with
 /// it must stay alive while the stream is in use.

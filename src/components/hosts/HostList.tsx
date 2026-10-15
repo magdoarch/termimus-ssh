@@ -21,6 +21,7 @@ import {
   Check,
   FileInput,
   ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useHostStore } from "../../stores/useHostStore";
@@ -29,6 +30,7 @@ import { useSftpStore } from "../../stores/useSftpStore";
 import { usePingStore } from "../../stores/usePingStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { useVaultStore } from "../../stores/useVaultStore";
+import { useInstallKeyStore } from "../../stores/useInstallKeyStore";
 import { FolderModal } from "./FolderModal";
 import { SshConfigImportModal } from "./SshConfigImportModal";
 import { api, Host, Folder, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
@@ -846,6 +848,20 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 <Copy size={13} />
                 <span>Copy Address</span>
               </button>
+
+              {/* ssh-copy-id: authorize a Keychain key on this host */}
+              {isSshHost(contextMenu.host!) && (
+                <button
+                  onClick={() => {
+                    useInstallKeyStore.getState().open({ hostId: contextMenu.host!.id });
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <KeyRound size={13} />
+                  <span>Install SSH Key…</span>
+                </button>
+              )}
 
               {/* Copy the current 2FA code (saved TOTP secret) */}
               {contextMenu.host!.totp_credential_id && (

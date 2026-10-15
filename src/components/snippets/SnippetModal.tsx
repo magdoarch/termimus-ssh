@@ -2,12 +2,14 @@ import { useState, useEffect } from "react";
 import { X, Terminal, Lock, Eye, EyeOff } from "lucide-react";
 import { useSnippetStore } from "../../stores/useSnippetStore";
 import { SnippetInput } from "../../lib/api";
+import { snippetVariables } from "../../lib/snippetVars";
 
 export function SnippetModal() {
   const { isModalOpen, editingSnippet, closeModal, saveSnippet } = useSnippetStore();
 
   const [title, setTitle] = useState("");
   const [command, setCommand] = useState("");
+  const variables = snippetVariables(command);
   const [tagInput, setTagInput] = useState("");
   const [isSecret, setIsSecret] = useState(false);
   const [showCommandText, setShowCommandText] = useState(true);
@@ -192,6 +194,29 @@ export function SnippetModal() {
               }
               className="w-full font-mono rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/50 focus:border-[var(--accent)] focus:outline-none"
             />
+            {!isSecret && (
+              <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                {variables.length > 0 ? (
+                  <>
+                    Asked when it runs:{" "}
+                    {variables.map((v) => (
+                      <span
+                        key={v.name}
+                        className="mr-1 inline-block rounded border border-[var(--border)] bg-[var(--surface-container)] px-1 font-mono text-[10px] text-[var(--text-secondary)]"
+                      >
+                        {v.name}
+                        {v.defaultValue && `=${v.defaultValue}`}
+                      </span>
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    Use <span className="font-mono">{"{{name}}"}</span> or{" "}
+                    <span className="font-mono">{"{{name:default}}"}</span> for values to fill in each time it runs.
+                  </>
+                )}
+              </p>
+            )}
             {isSecret && (
               <p className="mt-1 text-[10px] text-[var(--text-muted)]">
                 Secret snippet text is masked by default in the UI. Click the eye button to reveal.

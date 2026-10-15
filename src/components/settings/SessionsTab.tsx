@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Network, type LucideIcon } from "lucide-react";
+import { ClipboardPaste, Network, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 
@@ -39,6 +39,8 @@ export function SessionsTab() {
     useShallow((s) => ({
       shareConnections: s.shareConnections,
       setShareConnections: s.setShareConnections,
+      confirmMultilinePaste: s.confirmMultilinePaste,
+      setConfirmMultilinePaste: s.setConfirmMultilinePaste,
     }))
   );
 
@@ -60,6 +62,25 @@ export function SessionsTab() {
             OpenSSH's ControlMaster, so passwords and 2FA codes are asked once. When the server refuses another
             session on it (sshd <span className="font-mono">MaxSessions</span>), a separate connection is opened
             automatically. Turn off to log in separately every time.
+          </ToggleRow>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-low)] shadow-sm overflow-hidden">
+        <div className="border-b border-[var(--border)] px-5 py-4">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Terminal</h3>
+          <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Safety nets while you type and paste.</p>
+        </div>
+        <div className="divide-y divide-[var(--border)] text-xs">
+          <ToggleRow
+            icon={ClipboardPaste}
+            title="Confirm before pasting multiple lines"
+            checked={settings.confirmMultilinePaste}
+            onChange={settings.setConfirmMultilinePaste}
+          >
+            Shows what you are about to paste when it has line breaks and the shell would run each line right
+            away. Programs that handle pastes themselves (bracketed paste: modern bash and zsh prompts, vim,
+            nano) aren't interrupted.
           </ToggleRow>
         </div>
       </div>

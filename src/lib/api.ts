@@ -575,6 +575,10 @@ export const api = {
   remoteDisconnect: (sessionId: string) =>
     invoke<void>("remote_disconnect", { sessionId }),
 
+  /** ssh-copy-id: add a Keychain key's public half to the host's authorized_keys */
+  installPublicKey: (hostId: string, credentialId: string) =>
+    invoke<{ alreadyInstalled: boolean }>("ssh_install_public_key", { hostId, credentialId }),
+
   /** Share one SSH connection per host between tabs, SFTP and tunnels */
   setConnectionSharing: (enabled: boolean) =>
     invoke<void>("ssh_set_connection_sharing", { enabled }),

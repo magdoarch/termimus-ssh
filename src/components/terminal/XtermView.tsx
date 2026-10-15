@@ -2,9 +2,13 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { listen } from "@tauri-apps/api/event";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { copyText } from "../../lib/clipboard";
+import { openExternalUrl } from "../../lib/openUrl";
+import { useSettingsStore } from "../../stores/useSettingsStore";
+import { usePasteConfirmStore } from "../../stores/usePasteConfirmStore";
 import {
   Copy,
   Clipboard,
@@ -153,6 +157,25 @@ async function handleCopyFromTerminal(
 let lastPasteTimestamp = 0;
 let lastPastedContent = "";
 
+/**
+ * Paste into the terminal (xterm wraps it for bracketed paste when the remote
+ * side asked for that). Text with line breaks going into a shell that would
+ * run each line right away is confirmed first (Settings > SSH & Sessions).
+ */
+function pasteText(term: Terminal, text: string) {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const runsLines = normalized.includes("\n") && !term.modes.bracketedPasteMode;
+  if (!runsLines || !useSettingsStore.getState().confirmMultilinePaste) {
+    term.paste(text);
+    return;
+  }
+  usePasteConfirmStore.getState().ask({
+    text: normalized,
+    paste: (confirmed) => term.paste(confirmed),
+    done: () => term.focus(),
+  });
+}
+
 async function safePasteToTerminal(term: Terminal) {
   try {
     let text = "";
@@ -172,7 +195,7 @@ async function safePasteToTerminal(term: Terminal) {
     lastPasteTimestamp = now;
     lastPastedContent = text;
     // Uses xterm's bracketed paste mode which emits cleanly through term.onData (with multi-terminal sync)
-    term.paste(text);
+    pasteText(term, text);
   } catch (err) {
     console.warn("Clipboard paste failed:", err);
   }
@@ -593,6 +616,25 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
       term.loadAddon(searchAddon);
       searchAddonRef.current = searchAddon;
 
+      // Links open with Ctrl+click (Cmd+click on macOS); a plain click still
+      // selects text.
+      const linkModifier = checkIsMac() ? "Cmd" : "Ctrl";
+      term.loadAddon(
+        new WebLinksAddon(
+          (event, uri) => {
+            if (event.ctrlKey || event.metaKey) openExternalUrl(uri);
+          },
+          {
+            hover: (_event, uri) => {
+              domWrapper.title = `${linkModifier}+click to open ${uri}`;
+            },
+            leave: () => {
+              domWrapper.title = "";
+            },
+          }
+        )
+      );
+
       term.open(domWrapper);
 
       // Capture-phase paste handler to ensure DOM paste events are forwarded to xterm
@@ -610,7 +652,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
             }
             lastPasteTimestamp = now;
             lastPastedContent = text;
-            term.paste(text);
+            pasteText(term, text);
           } else {
             safePasteToTerminal(term);
           }

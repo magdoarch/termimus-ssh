@@ -25,8 +25,11 @@ interface SettingsState {
   appTheme: AppTheme;
   /** One SSH connection per host, shared by tabs, SFTP and tunnels (backend pool) */
   shareConnections: boolean;
+  /** Ask before pasting text that would run line by line in the shell */
+  confirmMultilinePaste: boolean;
   setAppTheme: (v: AppTheme) => void;
   setShareConnections: (v: boolean) => void;
+  setConfirmMultilinePaste: (v: boolean) => void;
   setUseOsKeyring: (v: boolean) => void;
   setUseBiometrics: (v: boolean) => void;
   setAutoLockPolicy: (v: AutoLockPolicy) => void;
@@ -40,8 +43,10 @@ export const useSettingsStore = create<SettingsState>()(
       autoLockPolicy: "on_close",
       appTheme: "dark",
       shareConnections: true,
+      confirmMultilinePaste: true,
       setAppTheme: (v) => set({ appTheme: v }),
       setShareConnections: (v) => set({ shareConnections: v }),
+      setConfirmMultilinePaste: (v) => set({ confirmMultilinePaste: v }),
       setUseOsKeyring: (v) => set({ useOsKeyring: v }),
       setUseBiometrics: (v) => set({ useBiometrics: v }),
       setAutoLockPolicy: (v) => set({ autoLockPolicy: v }),

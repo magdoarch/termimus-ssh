@@ -16,6 +16,7 @@ use russh::client::Msg;
 use russh::Channel;
 
 use super::*;
+use crate::ssh::conn;
 
 pub(crate) struct TestServer {
     pub address: String,
@@ -212,4 +213,48 @@ async fn sftp_falls_back_to_its_own_connection_at_max_sessions() {
         assert!(!sftp.list(&format!("s{i}"), "/").await.unwrap().is_empty());
         sftp.disconnect(&format!("s{i}")).await.unwrap();
     }
+}
+
+async fn install_key(connection: &SshConnection, home: &str, key: &str) -> conn::ExecOutput {
+    let command = format!("HOME={home} {}", conn::sh_command(conn::INSTALL_PUBLIC_KEY_SCRIPT));
+    connection.exec(&command, Some(format!("{key}\n").as_bytes()), 4096).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn installing_a_public_key_like_ssh_copy_id() {
+    let server = TestServer::from_env();
+    let db = Arc::new(Database::in_memory().unwrap());
+    let pool = ConnectionPool::new();
+    let (connection, _) = pool.connect(&db, &server.route(None), &no_progress()).await.unwrap();
+    // A throwaway HOME on the server: the real ~/.ssh is never touched.
+    let home = format!("{}/termimus-install-key-{}", server.dir, uuid::Uuid::new_v4());
+    let run = |command: String| {
+        let connection = connection.clone();
+        async move { connection.exec(&command, None, 65536).await.unwrap().stdout_text() }
+    };
+
+    // An existing file whose last line has no newline.
+    run(format!("mkdir -p {home}/.ssh && printf 'ssh-ed25519 AAAAexisting old' > {home}/.ssh/authorized_keys")).await;
+    let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMGaPL16Ro3wQhyfr7/wRktUu2x3VOrtX/SB106K/QP8 me@laptop";
+    let added = install_key(&connection, &home, key).await;
+    assert_eq!((added.stdout_text().trim(), added.exit_status), ("added", Some(0)), "{}", added.stderr_text());
+    assert_eq!(
+        run(format!("cat {home}/.ssh/authorized_keys")).await,
+        format!("ssh-ed25519 AAAAexisting old\n{key}\n")
+    );
+    // Same key with another comment: already there.
+    let again = install_key(&connection, &home, &key.replace("me@laptop", "other")).await;
+    assert_eq!(again.stdout_text().trim(), "already");
+    assert_eq!(install_key(&connection, &home, "garbage").await.exit_status, Some(2));
+
+    // A fresh account: private permissions.
+    let fresh = format!("{home}/fresh");
+    run(format!("mkdir -p {fresh}")).await;
+    assert_eq!(install_key(&connection, &fresh, key).await.stdout_text().trim(), "added");
+    assert_eq!(
+        run(format!("stat -c %a {fresh}/.ssh {fresh}/.ssh/authorized_keys")).await.split_whitespace().collect::<Vec<_>>(),
+        ["700", "600"]
+    );
+    run(format!("rm -rf {home}")).await;
 }

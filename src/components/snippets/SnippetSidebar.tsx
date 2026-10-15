@@ -24,6 +24,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useSnippetStore } from "../../stores/useSnippetStore";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
+import { useSnippetVarsStore } from "../../stores/useSnippetVarsStore";
 import { getAllLeafPanes } from "../../lib/layoutTree";
 import { Snippet } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
@@ -162,7 +163,9 @@ export function SnippetSidebar() {
   // Run execution handler
   const handleExecute = useCallback(
     async (snippet: Snippet, mode: "auto" | "broadcast" | "single") => {
-      const res = await sendSnippetToTerminals(snippet.command, mode);
+      const command = await useSnippetVarsStore.getState().fill(snippet.command, snippet.title);
+      if (command === null) return;
+      const res = await sendSnippetToTerminals(command, mode);
       const feedbackMsg = res.ok
         ? res.count > 1
           ? `Broadcasted to ${res.count} terminals`
