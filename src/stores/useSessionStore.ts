@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { api, Host } from "../lib/api";
+import { api, Host, isSshHost, RemoteDesktopProtocol } from "../lib/api";
 import {
   PaneNode,
   SplitDirection,
@@ -32,24 +32,24 @@ export interface SshTab {
   connecting: boolean;
   error?: string;
   isLocal?: boolean;
-  /** "vnc" for remote desktop tabs; undefined means an SSH or local terminal */
-  protocol?: "vnc";
+  /** Set for remote desktop tabs; undefined means an SSH or local terminal */
+  protocol?: RemoteDesktopProtocol;
 }
 
 /** Tabs backed by a shell (SSH or local PTY) that accept typed text. */
-export const isTerminalTab = (tab: SshTab | undefined) => Boolean(tab) && tab!.protocol !== "vnc";
+export const isTerminalTab = (tab: SshTab | undefined) => Boolean(tab) && !tab!.protocol;
 
 /** Tab shown for a saved host: an SSH terminal or a VNC remote desktop. */
 function tabForHost(sessionId: string, host: Host): SshTab {
-  const isVnc = host.protocol === "vnc";
+  const protocol = isSshHost(host) ? undefined : (host.protocol as RemoteDesktopProtocol);
   return {
     id: sessionId,
     hostId: host.id,
     hostLabel: host.label,
-    hostAddress: isVnc ? `${host.address}:${host.port}` : `${host.username}@${host.address}`,
+    hostAddress: host.username ? `${host.username}@${host.address}` : `${host.address}:${host.port}`,
     connected: false,
     connecting: true,
-    ...(isVnc ? { protocol: "vnc" as const } : {}),
+    ...(protocol ? { protocol } : {}),
   };
 }
 
@@ -589,7 +589,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     // 2. Clean up the xterm / remote desktop view & Tauri event listeners
     try {
-      if (tabToClose?.protocol === "vnc") {
+      if (tabToClose?.protocol) {
         disposeRemoteSession(sessionId);
       } else {
         disposeTerminalSession(sessionId);
@@ -600,7 +600,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     // 3. Disconnect SSH / VNC / Local backend
     try {
-      if (tabToClose?.protocol === "vnc") {
+      if (tabToClose?.protocol) {
         await api.remoteDisconnect(sessionId);
       } else if (tabToClose?.isLocal || sessionId.startsWith("local-")) {
         await api.killLocalPty(sessionId);

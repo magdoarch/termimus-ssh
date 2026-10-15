@@ -376,7 +376,7 @@ export function PaneView({ pane, visible = true }: PaneViewProps) {
           if (!tab) return null;
           const isTabActive = tab.id === pane.activeTabId;
 
-          const View = tab.protocol === "vnc" ? RemoteDesktopView : XtermView;
+          const View = tab.protocol ? RemoteDesktopView : XtermView;
           return (
             <View
               key={tab.id}

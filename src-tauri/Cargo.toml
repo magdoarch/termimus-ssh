@@ -42,6 +42,15 @@ portable-pty = "0.8"
 socket2 = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 vnc-rs = "=0.5.3"
+ironrdp-connector = "0.10"
+ironrdp-session = "0.11"
+ironrdp-graphics = "0.9"
+ironrdp-pdu = "0.9"
+ironrdp-input = "0.7"
+ironrdp-core = { version = "0.2", features = ["alloc"] }
+ironrdp-tokio = { version = "0.10", features = ["reqwest"] }
+ironrdp-tls = { version = "0.2", features = ["rustls"] }
+sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

@@ -4,8 +4,14 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum RemoteInput {
-    /// X11 keysym (mapped from `KeyboardEvent` in `src/lib/remoteInput.ts`).
-    Key { keysym: u32, down: bool },
+    /// X11 keysym (VNC) and PC/AT set-1 scancode with 0xE0xx for extended
+    /// keys (RDP), both mapped from `KeyboardEvent` in `src/lib/remoteInput.ts`.
+    Key {
+        keysym: u32,
+        down: bool,
+        #[serde(default)]
+        scancode: Option<u16>,
+    },
     /// Position in remote framebuffer pixels. `buttons` is the RFB mask:
     /// bit 0 left, 1 middle, 2 right, 3/4 wheel up/down.
     Pointer { x: u16, y: u16, buttons: u8 },

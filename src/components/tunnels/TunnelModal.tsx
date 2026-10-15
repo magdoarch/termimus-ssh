@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { X, ArrowLeftRight } from "lucide-react";
 import { useTunnelStore } from "../../stores/useTunnelStore";
 import { useHostStore } from "../../stores/useHostStore";
-import { PortForwardInput } from "../../lib/api";
+import { isSshHost, PortForwardInput } from "../../lib/api";
 import { CustomSelect } from "../ui/CustomSelect";
 
 export function TunnelModal() {
@@ -125,7 +125,7 @@ export function TunnelModal() {
               placeholder="Select SSH server..."
               options={[
                 { value: "", label: "Select SSH server..." },
-                ...hosts.filter((h) => h.protocol !== "vnc").map((h) => ({
+                ...hosts.filter(isSshHost).map((h) => ({
                   value: h.id,
                   label: h.label,
                   description: `(${h.username}@${h.address}:${h.port})`,

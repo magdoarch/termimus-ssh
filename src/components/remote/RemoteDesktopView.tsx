@@ -3,7 +3,7 @@ import { ClipboardPaste, Expand, RefreshCw, Shrink } from "lucide-react";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { useHostStore } from "../../stores/useHostStore";
 import { useSessionStore } from "../../stores/useSessionStore";
-import { KEYSYM } from "../../lib/remoteInput";
+import { KEYSYM, SCANCODE } from "../../lib/remoteInput";
 import { ConnectionProgress } from "../terminal/ConnectionProgress";
 import {
   connectRemoteSession,
@@ -12,6 +12,7 @@ import {
   sendRemoteInput,
   sendRemoteKeyCombo,
   setRemoteScaleMode,
+  startRemoteSession,
 } from "./remoteSessionPool";
 
 interface RemoteDesktopViewProps {
@@ -25,6 +26,7 @@ export function RemoteDesktopView({ sessionId, hostId, visible, isFocused = true
   const containerRef = useRef<HTMLDivElement>(null);
   const host = useHostStore((s) => s.hosts.find((h) => h.id === hostId));
   const closeSession = useSessionStore((s) => s.closeSession);
+  const protocol = useSessionStore((s) => s.tabs.find((t) => t.id === sessionId)?.protocol) ?? "vnc";
 
   // The pool entry outlives this component (split/drag remounts); create it
   // synchronously so the first render already reflects its state.
@@ -54,6 +56,7 @@ export function RemoteDesktopView({ sessionId, hostId, visible, isFocused = true
     const container = containerRef.current;
     if (!container) return;
     if (entry.element.parentElement !== container) container.appendChild(entry.element);
+    startRemoteSession(entry);
     return () => {
       if (entry.element.parentElement === container) container.removeChild(entry.element);
     };
@@ -97,16 +100,23 @@ export function RemoteDesktopView({ sessionId, hostId, visible, isFocused = true
               className={toolbarButton}
               title="Send Ctrl+Alt+Del"
               onClick={() => {
-                sendRemoteKeyCombo(entry, [KEYSYM.ControlLeft, KEYSYM.AltLeft, KEYSYM.Delete]);
+                sendRemoteKeyCombo(entry, [
+                  { keysym: KEYSYM.ControlLeft, scancode: SCANCODE.ControlLeft },
+                  { keysym: KEYSYM.AltLeft, scancode: SCANCODE.AltLeft },
+                  { keysym: KEYSYM.Delete, scancode: SCANCODE.Delete },
+                ]);
                 entry.element.focus();
               }}
             >
               <span className="font-mono">Ctrl+Alt+Del</span>
             </button>
-            <button className={toolbarButton} title="Paste local clipboard to the remote clipboard" onClick={sendClipboard}>
-              <ClipboardPaste size={13} />
-              <span>Clipboard</span>
-            </button>
+            {/* RDP clipboard redirection (CLIPRDR) isn't implemented yet */}
+            {protocol === "vnc" && (
+              <button className={toolbarButton} title="Paste local clipboard to the remote clipboard" onClick={sendClipboard}>
+                <ClipboardPaste size={13} />
+                <span>Clipboard</span>
+              </button>
+            )}
             <button
               className={toolbarButton}
               title={scaleMode === "fit" ? "Show at actual size (1:1)" : "Fit to pane"}
@@ -115,13 +125,15 @@ export function RemoteDesktopView({ sessionId, hostId, visible, isFocused = true
               {scaleMode === "fit" ? <Expand size={13} /> : <Shrink size={13} />}
               <span>{scaleMode === "fit" ? "1:1" : "Fit"}</span>
             </button>
-            <button
-              className={toolbarButton}
-              title="Request a full screen refresh"
-              onClick={() => sendRemoteInput(entry, { type: "refresh" })}
-            >
-              <RefreshCw size={13} />
-            </button>
+            {protocol === "vnc" && (
+              <button
+                className={toolbarButton}
+                title="Request a full screen refresh"
+                onClick={() => sendRemoteInput(entry, { type: "refresh" })}
+              >
+                <RefreshCw size={13} />
+              </button>
+            )}
             <span className="px-1.5 font-mono text-[10px] text-[var(--text-muted)]">
               {size.width}×{size.height}
             </span>
@@ -131,7 +143,7 @@ export function RemoteDesktopView({ sessionId, hostId, visible, isFocused = true
 
       {!connected && (
         <ConnectionProgress
-          protocol="vnc"
+          protocol={protocol}
           sessionId={sessionId}
           host={host}
           logs={state.logs}

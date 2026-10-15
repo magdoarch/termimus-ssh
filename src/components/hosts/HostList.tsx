@@ -28,7 +28,7 @@ import { usePingStore } from "../../stores/usePingStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { useVaultStore } from "../../stores/useVaultStore";
 import { FolderModal } from "./FolderModal";
-import { Host, Folder } from "../../lib/api";
+import { Host, Folder, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
 import { DistroBadge } from "./DistroBadge";
 import { HostListRow } from "./HostListRow";
 import { copyText } from "../../lib/clipboard";
@@ -279,7 +279,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
     async (e: React.MouseEvent, host: Host) => {
       e.stopPropagation();
       // SFTP needs an SSH server; VNC hosts have no file transfer.
-      if (host.protocol === "vnc") return;
+      if (!isSshHost(host)) return;
       if (!useVaultStore.getState().isUnlocked) {
         useVaultStore.getState().openUnlockPrompt();
         return;
@@ -725,7 +725,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Terminal size={13} />
-                <span>{contextMenu.host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
+                <span>Connect {PROTOCOL_LABELS[contextMenu.host.protocol ?? "ssh"]}</span>
               </button>
 
               {/* Split Right */}
@@ -755,7 +755,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
               <div className="my-1 h-[1px] bg-[var(--border)]" />
 
               {/* SFTP Browser (SSH hosts only) */}
-              {contextMenu.host.protocol !== "vnc" && (
+              {isSshHost(contextMenu.host) && (
                 <button
                   onClick={(e) => {
                     handleSftpClick(e, contextMenu.host!);
@@ -795,7 +795,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
               </button>
 
               {/* Copy SSH Command */}
-              {contextMenu.host!.protocol !== "vnc" && (
+              {isSshHost(contextMenu.host!) && (
                 <button
                   onClick={async () => {
                     const port = contextMenu.host!.port || 22;
@@ -1103,7 +1103,7 @@ const HostCard = memo(function HostCard({
             )}
           </div>
           <p className="truncate text-xs text-[var(--text-muted)] font-mono mt-0.5">
-            {host.protocol === "vnc" ? "vnc, remote desktop" : `ssh, ${host.username}`}
+            {host.protocol === "vnc" ? "vnc, remote desktop" : `${host.protocol ?? "ssh"}, ${host.username}`}
           </p>
         </div>
       </div>
@@ -1129,10 +1129,10 @@ const HostCard = memo(function HostCard({
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition"
             >
               <Terminal size={13} />
-              <span>{host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
+              <span>Connect {PROTOCOL_LABELS[host.protocol ?? "ssh"]}</span>
             </button>
 
-            {host.protocol !== "vnc" && (
+            {isSshHost(host) && (
               <button
                 onClick={(e) => {
                   onToggleMenu(host.id);

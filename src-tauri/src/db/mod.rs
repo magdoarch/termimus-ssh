@@ -141,7 +141,7 @@ impl Database {
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN os_icon TEXT", []);
         // v0.5.0: bastion / jump host proxyjump
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN jump_host_id TEXT", []);
-        // Remote desktop protocols (VNC) alongside SSH
+        // Remote desktop protocols (VNC, RDP) alongside SSH
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN protocol TEXT NOT NULL DEFAULT 'ssh'", []);
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN protocol_options TEXT", []);
         // folders updated_at

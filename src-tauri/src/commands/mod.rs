@@ -1,7 +1,7 @@
 use crate::db::models::{Folder, Host, HostInput, Credential, KeychainItem, KeychainKeyInput, KeychainIdentityInput, PortForwardRule, PortForwardInput, Snippet, SnippetInput, KnownHost, BackupBundle, EncryptedBackupEnvelope, ImportSummary, WorkspacePreset, WorkspacePresetInput};
 use crate::db::Database;
 use crate::pty::PtyManager;
-use crate::remote::{RemoteDesktopManager, RemoteInput, VncOptions, VncTarget};
+use crate::remote::{RdpOptions, RemoteDesktopManager, RemoteInput, RemoteProtocolTarget, RemoteTarget, VncOptions};
 use crate::sftp::{self, FileEntry, SftpManager};
 use crate::ssh::{SessionManager, SshAuth};
 use crate::tunnel::TunnelManager;
@@ -477,7 +477,7 @@ pub fn host_save(state: State<AppState>, input: HostInput, host_id: Option<Strin
         existing.as_ref().and_then(|h| h.os_icon.clone())
     };
     let jump_host_id = input.jump_host_id;
-    if !matches!(input.protocol.as_str(), "ssh" | "vnc") {
+    if !matches!(input.protocol.as_str(), "ssh" | "vnc" | "rdp") {
         return Err(format!("Unsupported protocol: {}", input.protocol));
     }
 
@@ -1933,10 +1933,10 @@ pub async fn sync_get_devices(
     Ok(body.devices)
 }
 
-// ================= REMOTE DESKTOP (VNC) COMMANDS =================
+// ================= REMOTE DESKTOP (VNC / RDP) COMMANDS =================
 
-/// Decrypt the VNC password for a host. `auth_method == "none"` means the
-/// server is configured without authentication.
+/// Decrypt the password for a remote desktop host. `auth_method == "none"`
+/// means a VNC server configured without authentication.
 fn resolve_remote_password(state: &AppState, host: &Host) -> Result<Option<zeroize::Zeroizing<String>>, String> {
     if host.auth_method == "none" {
         return Ok(None);
@@ -1954,16 +1954,28 @@ fn resolve_remote_password(state: &AppState, host: &Host) -> Result<Option<zeroi
     Ok(Some(zeroize::Zeroizing::new(password)))
 }
 
-/// Connect a VNC host. Frames stream to `on_frame` (binary, see
+fn parse_protocol_options<T: Default + serde::de::DeserializeOwned>(host: &Host) -> Result<T, String> {
+    host.protocol_options
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|e| format!("Invalid {} options for this host: {e}", host.protocol.to_uppercase()))
+        .map(Option::unwrap_or_default)
+}
+
+/// Connect a VNC or RDP host. Frames stream to `on_frame` (binary, see
 /// `remote/frame.rs`); progress, clipboard and close notifications are
 /// emitted as `remote-progress-{id}`, `remote-clipboard-{id}` and
-/// `remote-closed-{id}`.
+/// `remote-closed-{id}`. `width`/`height` is the pane size, used as the RDP
+/// desktop size (VNC uses the server's size).
 #[tauri::command]
 pub async fn remote_connect(
     app: AppHandle,
     state: State<'_, AppState>,
     host_id: String,
     session_id: String,
+    width: Option<u16>,
+    height: Option<u16>,
     on_frame: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
 ) -> Result<(), String> {
     let host = state
@@ -1971,30 +1983,37 @@ pub async fn remote_connect(
         .get_host(&host_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Host not found".to_string())?;
-    if host.protocol != "vnc" {
-        return Err(format!("'{}' is not a VNC host", host.label));
-    }
 
     let password = resolve_remote_password(&state, &host)?;
-    let jump = resolve_jump_host(&state, &host)?;
-    let options: VncOptions = host
-        .protocol_options
-        .as_deref()
-        .map(serde_json::from_str)
-        .transpose()
-        .map_err(|e| format!("Invalid VNC options for this host: {e}"))?
-        .unwrap_or_default();
+    let protocol = match host.protocol.as_str() {
+        "vnc" => RemoteProtocolTarget::Vnc {
+            password,
+            options: parse_protocol_options::<VncOptions>(&host)?,
+        },
+        "rdp" => {
+            let options: RdpOptions = parse_protocol_options(&host)?;
+            RemoteProtocolTarget::Rdp {
+                login: crate::remote::rdp::RdpLogin {
+                    username: host.username.clone(),
+                    password,
+                    domain: options.domain,
+                },
+                view_only: options.view_only,
+                desktop: (width.unwrap_or(1280), height.unwrap_or(800)),
+            }
+        }
+        other => return Err(format!("'{}' is a {} host, not a remote desktop", host.label, other.to_uppercase())),
+    };
 
-    let target = VncTarget {
-        address: host.address,
+    let target = RemoteTarget {
+        address: host.address.clone(),
         port: host.port,
-        password,
-        jump,
-        options,
+        jump: resolve_jump_host(&state, &host)?,
+        protocol,
     };
     state
         .remote
-        .connect_vnc(app, state.db.clone(), session_id, target, on_frame)
+        .connect(app, state.db.clone(), session_id, target, on_frame)
         .await?;
 
     let _ = state.db.touch_host_last_connected(&host_id);

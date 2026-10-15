@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api, RemoteInputEvent } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 import { applyFrameBatch, createRemoteSurface, RemoteSurface } from "../../lib/remoteFrame";
-import { keysymForEvent, rfbButtonMask, rfbWheelBit } from "../../lib/remoteInput";
+import { keysymForEvent, rfbButtonMask, rfbWheelBit, scancodeForEvent } from "../../lib/remoteInput";
 import { useSessionStore } from "../../stores/useSessionStore";
 import type { ConnectionLog } from "../terminal/ConnectionProgress";
 
@@ -24,6 +24,12 @@ export interface RemoteConnectionState {
 
 export type RemoteScaleMode = "fit" | "actual";
 
+/** A key as both protocols need it: keysym for VNC, scancode for RDP. */
+export interface RemoteKey {
+  keysym: number;
+  scancode?: number;
+}
+
 export interface RemoteSessionEntry {
   sessionId: string;
   hostId: string;
@@ -39,8 +45,10 @@ export interface RemoteSessionEntry {
   drawQueue: Promise<void>;
   pendingInput: RemoteInputEvent[];
   inputFlushScheduled: boolean;
-  /** keysym sent on keydown per physical key, so keyup releases the same one */
-  pressedKeys: Map<string, number>;
+  /** Key sent on keydown per physical key, so keyup releases the same one */
+  pressedKeys: Map<string, RemoteKey>;
+  /** First connect happens once the view is mounted and has a size */
+  started: boolean;
   pointerButtons: number;
   disposed: boolean;
 }
@@ -87,6 +95,7 @@ export function getOrCreateRemoteSession(sessionId: string, hostId: string): Rem
     pressedKeys: new Map(),
     pointerButtons: 0,
     disposed: false,
+    started: false,
   };
   element.appendChild(entry.surface.canvas);
   applyScaleMode(entry);
@@ -127,8 +136,15 @@ export function getOrCreateRemoteSession(sessionId: string, hostId: string): Rem
     copyText(event.payload).catch(() => {});
   }).then(keep);
 
-  connectRemoteSession(entry);
   return entry;
+}
+
+/** Connect for the first time; called by the view once it is mounted, so the
+ *  RDP desktop can be sized to the pane. */
+export function startRemoteSession(entry: RemoteSessionEntry) {
+  if (entry.started || entry.disposed) return;
+  entry.started = true;
+  connectRemoteSession(entry);
 }
 
 /** (Re)connect. A fresh Channel per attempt: message indices restart per backend channel. */
@@ -141,7 +157,7 @@ export function connectRemoteSession(entry: RemoteSessionEntry) {
     logs: [
       {
         step: 1,
-        message: `Initiating VNC connection to ${host?.hostAddress || "server"}...`,
+        message: `Initiating ${(host?.protocol ?? "vnc").toUpperCase()} connection to ${host?.hostAddress || "server"}...`,
         timestamp: new Date().toISOString(),
         isError: false,
       },
@@ -157,7 +173,7 @@ export function connectRemoteSession(entry: RemoteSessionEntry) {
   };
 
   api
-    .remoteConnect(entry.hostId, entry.sessionId, channel)
+    .remoteConnect(entry.hostId, entry.sessionId, channel, paneSize(entry))
     .then(() => {
       if (entry.disposed) return;
       useSessionStore.getState().setSessionConnected(entry.sessionId, true);
@@ -170,6 +186,13 @@ export function connectRemoteSession(entry: RemoteSessionEntry) {
       useSessionStore.getState().setSessionError(entry.sessionId, message);
       setState(entry, { status: "closed", error: message });
     });
+}
+
+/** Pane size in CSS pixels, used as the RDP desktop size (VNC ignores it). */
+function paneSize(entry: RemoteSessionEntry): { width: number; height: number } | undefined {
+  const rect = entry.element.getBoundingClientRect();
+  if (rect.width < 100 || rect.height < 100) return undefined;
+  return { width: Math.round(rect.width), height: Math.round(rect.height) };
 }
 
 export function disposeRemoteSession(sessionId: string) {
@@ -237,13 +260,13 @@ export function sendRemoteInput(entry: RemoteSessionEntry, event: RemoteInputEve
 
 /** Release every key still held, e.g. when focus leaves the view mid-chord. */
 export function releaseRemoteKeys(entry: RemoteSessionEntry) {
-  entry.pressedKeys.forEach((keysym) => sendRemoteInput(entry, { type: "key", keysym, down: false }));
+  entry.pressedKeys.forEach((key) => sendRemoteInput(entry, { type: "key", ...key, down: false }));
   entry.pressedKeys.clear();
 }
 
-export function sendRemoteKeyCombo(entry: RemoteSessionEntry, keysyms: number[]) {
-  keysyms.forEach((keysym) => sendRemoteInput(entry, { type: "key", keysym, down: true }));
-  [...keysyms].reverse().forEach((keysym) => sendRemoteInput(entry, { type: "key", keysym, down: false }));
+export function sendRemoteKeyCombo(entry: RemoteSessionEntry, keys: RemoteKey[]) {
+  keys.forEach((key) => sendRemoteInput(entry, { type: "key", ...key, down: true }));
+  [...keys].reverse().forEach((key) => sendRemoteInput(entry, { type: "key", ...key, down: false }));
 }
 
 function remotePosition(entry: RemoteSessionEntry, event: MouseEvent): { x: number; y: number } {
@@ -295,18 +318,20 @@ function attachInputHandlers(entry: RemoteSessionEntry) {
     event.preventDefault();
     event.stopPropagation();
     const keysym = keysymForEvent(event);
-    if (keysym === null) return;
-    entry.pressedKeys.set(event.code || event.key, keysym);
-    sendRemoteInput(entry, { type: "key", keysym, down: true });
+    const scancode = scancodeForEvent(event);
+    if (keysym === null && scancode === undefined) return;
+    const key: RemoteKey = { keysym: keysym ?? 0, scancode };
+    entry.pressedKeys.set(event.code || event.key, key);
+    sendRemoteInput(entry, { type: "key", ...key, down: true });
   });
   element.addEventListener("keyup", (event) => {
     event.preventDefault();
     event.stopPropagation();
     const id = event.code || event.key;
-    const keysym = entry.pressedKeys.get(id) ?? keysymForEvent(event);
+    const key = entry.pressedKeys.get(id);
     entry.pressedKeys.delete(id);
-    if (keysym === null) return;
-    sendRemoteInput(entry, { type: "key", keysym, down: false });
+    // Only release keys we pressed (focus may have arrived mid-keystroke).
+    if (key) sendRemoteInput(entry, { type: "key", ...key, down: false });
   });
   element.addEventListener("blur", () => releaseRemoteKeys(entry));
 }

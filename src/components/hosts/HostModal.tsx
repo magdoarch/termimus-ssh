@@ -11,13 +11,14 @@ import {
   EyeOff,
   Cpu,
   Monitor,
+  MonitorSmartphone,
   Terminal as TerminalIcon,
   ShieldAlert,
   Unlock,
 } from "lucide-react";
 import { useHostStore } from "../../stores/useHostStore";
 import { useKeychainStore } from "../../stores/useKeychainStore";
-import { api, DEFAULT_PORTS, Host, HostInput, HostProtocol, VncOptions } from "../../lib/api";
+import { api, DEFAULT_PORTS, Host, HostInput, HostProtocol, isSshHost, RdpOptions, VncOptions } from "../../lib/api";
 import { DistroBadge, DISTRO_OPTIONS } from "./DistroBadge";
 import { CustomSelect } from "../ui/CustomSelect";
 import { copyText } from "../../lib/clipboard";
@@ -38,6 +39,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
   const [protocol, setProtocol] = useState<HostProtocol>("ssh");
   const [authMethod, setAuthMethod] = useState<"password" | "private_key" | "none">("password");
   const [vncOptions, setVncOptions] = useState<VncOptions>({});
+  const [rdpOptions, setRdpOptions] = useState<RdpOptions>({});
   const [secret, setSecret] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [folderId, setFolderId] = useState<string>("");
@@ -136,6 +138,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       setAuthMethod("password");
       setProtocol("ssh");
       setVncOptions({});
+      setRdpOptions({});
       setSelectedCredentialId("");
       setSecret("");
       setTagInput("");
@@ -148,22 +151,26 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
 
   function loadProtocolFields(host: Host) {
     setProtocol(host.protocol ?? "ssh");
+    let options = {};
     try {
-      setVncOptions(host.protocol === "vnc" && host.protocol_options ? JSON.parse(host.protocol_options) : {});
+      options = host.protocol_options ? JSON.parse(host.protocol_options) : {};
     } catch {
-      setVncOptions({});
+      // ignore malformed options
     }
+    setVncOptions(host.protocol === "vnc" ? options : {});
+    setRdpOptions(host.protocol === "rdp" ? options : {});
   }
 
   function handleProtocolChange(next: HostProtocol) {
     if (next === protocol) return;
     // Follow the default port unless the user typed a custom one.
     if (port === DEFAULT_PORTS[protocol]) setPort(DEFAULT_PORTS[next]);
-    if (next === "vnc" && authMethod === "private_key") {
+    // Key auth is SSH-only; "no password" is VNC-only.
+    if (next !== "ssh" && authMethod === "private_key") {
       setAuthMethod("password");
       setSelectedCredentialId("");
     }
-    if (next === "ssh" && authMethod === "none") setAuthMethod("password");
+    if (next !== "vnc" && authMethod === "none") setAuthMethod("password");
     setProtocol(next);
   }
 
@@ -286,7 +293,11 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
         os_icon: osIcon || null,
         jump_host_id: jumpHostId || null,
         protocol,
-        protocol_options: isVnc ? JSON.stringify(vncOptions) : null,
+        protocol_options: isVnc
+          ? JSON.stringify(vncOptions)
+          : protocol === "rdp"
+          ? JSON.stringify({ ...rdpOptions, domain: rdpOptions.domain?.trim() || undefined })
+          : null,
       };
 
       await saveHost(input, editingHost?.id);
@@ -342,12 +353,14 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                 <label className="mb-1.5 block font-medium text-[var(--text-muted)]">Protocol</label>
                 <div className="flex gap-2">
                   {([
-                    { value: "ssh", label: "SSH Terminal", icon: TerminalIcon },
-                    { value: "vnc", label: "VNC Remote Desktop", icon: Monitor },
-                  ] as const).map(({ value, label: optionLabel, icon: Icon }) => (
+                    { value: "ssh", label: "SSH", title: "SSH terminal", icon: TerminalIcon },
+                    { value: "vnc", label: "VNC", title: "VNC remote desktop (Linux, macOS)", icon: Monitor },
+                    { value: "rdp", label: "RDP", title: "RDP remote desktop (Windows, xrdp)", icon: MonitorSmartphone },
+                  ] as const).map(({ value, label: optionLabel, title, icon: Icon }) => (
                     <button
                       key={value}
                       type="button"
+                      title={title}
                       onClick={() => handleProtocolChange(value)}
                       className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
                         protocol === value
@@ -415,17 +428,17 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                 </div>
               </div>
 
-              {protocol === "ssh" && (
+              {protocol !== "vnc" && (
               <div>
                 <label className="mb-1.5 block font-medium text-[var(--text-muted)]">
                   Username *
                 </label>
                 <input
                   type="text"
-                  required={protocol === "ssh"}
+                  required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. root or ubuntu"
+                  placeholder={protocol === "rdp" ? "e.g. Administrator" : "e.g. root or ubuntu"}
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-3 py-2 text-sm font-mono text-[var(--text-primary)] focus:border-[var(--primary)] focus:outline-none transition-colors"
                 />
               </div>
@@ -456,7 +469,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   options={[
                     { value: "", label: "Direct Connection (No Jump Host)" },
                     ...hosts
-                      .filter((h) => h.id !== editingHost?.id && h.protocol !== "vnc")
+                      .filter((h) => h.id !== editingHost?.id && isSshHost(h))
                       .map((h) => ({
                         value: h.id,
                         label: h.label,
@@ -477,6 +490,32 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   </div>
                 )}
               </div>
+
+              {protocol === "rdp" && (
+                <div className="space-y-2">
+                  <label className="block font-medium text-[var(--text-muted)]">RDP Options</label>
+                  <input
+                    type="text"
+                    value={rdpOptions.domain ?? ""}
+                    onChange={(e) => setRdpOptions({ ...rdpOptions, domain: e.target.value })}
+                    placeholder="Domain (optional), e.g. CORP"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-3 py-2 text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/50 focus:border-[var(--primary)] focus:outline-none transition-colors"
+                  />
+                  <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(rdpOptions.viewOnly)}
+                      onChange={(e) => setRdpOptions({ ...rdpOptions, viewOnly: e.target.checked })}
+                      className="accent-[var(--primary)]"
+                    />
+                    View only (don't send keyboard or mouse)
+                  </label>
+                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                    The server's TLS key is trusted on first connect and checked on every
+                    connect after that, like SSH host keys (see Settings → Trusted Host Keys).
+                  </p>
+                </div>
+              )}
 
               {protocol === "vnc" && (
                 <div className="space-y-2">
@@ -528,7 +567,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   >
                     <Lock size={13} /> Password
                   </button>
-                  {protocol === "vnc" ? (
+                  {protocol === "rdp" ? null : protocol === "vnc" ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -610,7 +649,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                             setShowPassword(true);
                           }}
                           disabled={passwordLoading}
-                          placeholder={passwordLoading ? "Loading..." : protocol === "vnc" ? "VNC password..." : "Server password..."}
+                          placeholder={passwordLoading ? "Loading..." : protocol === "vnc" ? "VNC password..." : protocol === "rdp" ? "Windows / RDP password..." : "Server password..."}
                           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-3 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/50 focus:border-[var(--primary)] focus:outline-none transition-colors disabled:opacity-60"
                         />
                         <button
