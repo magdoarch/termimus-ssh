@@ -53,10 +53,52 @@ pub struct SshClientHandler {
     pub address: String,
     pub port: u16,
     pub db: Arc<Database>,
+    /// Where connections from a remote port forward (`ssh -R`) are handed
+    /// off. `None` on connections that never requested one: any
+    /// forwarded-tcpip channel the server opens there is closed.
+    pub forwarded_tcpip: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
+}
+
+/// A connection the server accepted on a remote-forwarded port, delivered to
+/// the client as a `forwarded-tcpip` channel.
+pub struct ForwardedTcpip {
+    pub channel: russh::Channel<client::Msg>,
+    pub connected_address: String,
+    pub connected_port: u32,
+    pub originator_address: String,
+    pub originator_port: u32,
 }
 
 impl Handler for SshClientHandler {
     type Error = anyhow::Error;
+
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<client::Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        originator_address: &str,
+        originator_port: u32,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let forwarded = ForwardedTcpip {
+            channel,
+            connected_address: connected_address.to_string(),
+            connected_port,
+            originator_address: originator_address.to_string(),
+            originator_port,
+        };
+        let rejected = match &self.forwarded_tcpip {
+            Some(tx) => tx.send(forwarded).err().map(|e| e.0),
+            None => Some(forwarded),
+        };
+        // Nobody is serving forwards on this connection (never requested, or
+        // the tunnel already stopped): refuse instead of leaving it hanging.
+        if let Some(forwarded) = rejected {
+            let _ = forwarded.channel.close().await;
+        }
+        Ok(())
+    }
 
     async fn check_server_key(
         &mut self,
@@ -264,6 +306,7 @@ pub async fn open_transport(
                 address: jump.address.clone(),
                 port: jump.port,
                 db,
+                forwarded_tcpip: None,
             };
             let mut j_handle = client::connect_stream(default_client_config(), jump_tcp, jump_handler)
                 .await
@@ -306,12 +349,28 @@ pub async fn connect_authenticated(
     auth: &SshAuth,
     jump: Option<&JumpHostConfig>,
 ) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
+    connect_authenticated_with_forwarding(db, address, port, username, auth, jump, None).await
+}
+
+/// Like [`connect_authenticated`], but hands channels the server opens for
+/// remote port forwards (`tcpip-forward` requests made on this connection)
+/// to `forwarded_tcpip`.
+pub async fn connect_authenticated_with_forwarding(
+    db: Arc<Database>,
+    address: &str,
+    port: u16,
+    username: &str,
+    auth: &SshAuth,
+    jump: Option<&JumpHostConfig>,
+    forwarded_tcpip: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
+) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
     let (stream, jump_handle) = open_transport(db.clone(), address, port, jump).await?;
 
     let handler = SshClientHandler {
         address: address.to_string(),
         port,
         db,
+        forwarded_tcpip,
     };
     let mut handle = client::connect_stream(default_client_config(), stream, handler)
         .await
@@ -479,6 +538,7 @@ impl SessionManager {
                 address: jump.address.clone(),
                 port: jump.port,
                 db: db.clone(),
+                forwarded_tcpip: None,
             };
 
             let mut j_handle = match client::connect_stream(jump_config, jump_tcp, jump_handler).await {
@@ -574,6 +634,7 @@ impl SessionManager {
             address: address.clone(),
             port,
             db: db.clone(),
+            forwarded_tcpip: None,
         };
 
         let mut handle = match client::connect_stream(config, socket, handler).await {
@@ -963,6 +1024,7 @@ pub async fn detect_os_via_exec(
             address: address.clone(),
             port,
             db: db.clone(),
+            forwarded_tcpip: None,
         };
         let mut handle = russh::client::connect(config, (address.as_str(), port), handler)
             .await

@@ -11,7 +11,7 @@ use keyring::Entry as KeyringEntry;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -1229,6 +1229,8 @@ pub fn tunnel_rule_save(
         remote_port: input.remote_port,
         created_at,
     };
+    // Reject rules that could never start (unknown type, missing ports/host).
+    crate::tunnel::TunnelSpec::from_rule(&rule)?;
 
     state.db.save_port_forward(&rule).map_err(|e| e.to_string())?;
     Ok(rule)
@@ -1257,25 +1259,23 @@ pub async fn tunnel_start(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Target host not found".to_string())?;
 
-    let auth = resolve_host_auth(&state, &host)?;
-    let jump_host = resolve_jump_host(&state, &host)?;
+    let spec = crate::tunnel::TunnelSpec::from_rule(&rule)?;
+    let ssh = crate::tunnel::SshTarget {
+        auth: resolve_host_auth(&state, &host)?,
+        jump: resolve_jump_host(&state, &host)?,
+        address: host.address,
+        port: host.port,
+        username: host.username,
+    };
+    // One app-wide event so the UI can track every rule with a single
+    // listener (payload: { ruleId, state: "started" | "stopped", error }).
+    let status: crate::tunnel::StatusSink = Arc::new(move |status: crate::tunnel::TunnelStatus| {
+        let _ = app.emit("tunnel-status", status);
+    });
 
     state
         .tunnel
-        .start_local_forward(
-            app,
-            state.db.clone(),
-            rule_id,
-            host.address,
-            host.port,
-            host.username,
-            auth,
-            rule.local_address,
-            rule.local_port,
-            rule.remote_address,
-            rule.remote_port,
-            jump_host,
-        )
+        .start(state.db.clone(), rule_id, ssh, spec, status)
         .await
 }
 

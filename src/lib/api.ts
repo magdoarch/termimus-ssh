@@ -146,6 +146,14 @@ export interface PortForwardRule {
   created_at: string;
 }
 
+/** Payload of the app-wide "tunnel-status" event (see tunnel::TunnelStatus) */
+export interface TunnelStatusEvent {
+  ruleId: string;
+  state: "started" | "stopped";
+  /** Why the tunnel stopped on its own; null when stopped by the user */
+  error: string | null;
+}
+
 export interface PortForwardInput {
   host_id: string;
   label: string;

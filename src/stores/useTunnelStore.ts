@@ -1,9 +1,14 @@
 import { create } from "zustand";
-import { api, PortForwardRule, PortForwardInput } from "../lib/api";
+import { listen } from "@tauri-apps/api/event";
+import { api, PortForwardRule, PortForwardInput, TunnelStatusEvent } from "../lib/api";
+
+let statusListener: Promise<() => void> | null = null;
 
 interface TunnelState {
   rules: PortForwardRule[];
   activeRuleIds: Set<string>;
+  /** Why a tunnel stopped on its own (cleared when it is started again) */
+  ruleErrors: Record<string, string>;
   isLoading: boolean;
   error: string | null;
   isModalOpen: boolean;
@@ -11,6 +16,8 @@ interface TunnelState {
   startingRuleId: string | null;
 
   refresh: () => Promise<void>;
+  /** Track tunnels starting/stopping in the backend (e.g. SSH connection lost). Idempotent. */
+  listenForStatus: () => void;
   saveRule: (input: PortForwardInput, ruleId?: string) => Promise<void>;
   deleteRule: (id: string) => Promise<void>;
   toggleTunnel: (rule: PortForwardRule) => Promise<void>;
@@ -22,6 +29,7 @@ interface TunnelState {
 export const useTunnelStore = create<TunnelState>((set, get) => ({
   rules: [],
   activeRuleIds: new Set(),
+  ruleErrors: {},
   isLoading: false,
   error: null,
   isModalOpen: false,
@@ -43,6 +51,24 @@ export const useTunnelStore = create<TunnelState>((set, get) => ({
     }
   },
 
+  listenForStatus: () => {
+    if (statusListener) return;
+    statusListener = listen<TunnelStatusEvent>("tunnel-status", ({ payload }) => {
+      set((state) => {
+        const activeRuleIds = new Set(state.activeRuleIds);
+        const ruleErrors = { ...state.ruleErrors };
+        if (payload.state === "started") {
+          activeRuleIds.add(payload.ruleId);
+          delete ruleErrors[payload.ruleId];
+        } else {
+          activeRuleIds.delete(payload.ruleId);
+          if (payload.error) ruleErrors[payload.ruleId] = payload.error;
+        }
+        return { activeRuleIds, ruleErrors };
+      });
+    });
+  },
+
   saveRule: async (input, ruleId) => {
     await api.saveTunnelRule(input, ruleId);
     await get().refresh();
@@ -60,7 +86,11 @@ export const useTunnelStore = create<TunnelState>((set, get) => ({
   toggleTunnel: async (rule: PortForwardRule) => {
     const { activeRuleIds } = get();
     const isActive = activeRuleIds.has(rule.id);
-    set({ startingRuleId: rule.id, error: null });
+    set((state) => {
+      const ruleErrors = { ...state.ruleErrors };
+      delete ruleErrors[rule.id];
+      return { startingRuleId: rule.id, error: null, ruleErrors };
+    });
 
     try {
       if (isActive) {
