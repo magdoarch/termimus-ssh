@@ -58,8 +58,18 @@ pub struct Host {
     /// before connecting to this host.
     #[serde(default)]
     pub jump_host_id: Option<String>,
+    /// Connection protocol: "ssh" (default) or "vnc".
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
+    /// Protocol-specific options as JSON, e.g. `{"viewOnly":true}` for VNC.
+    #[serde(default)]
+    pub protocol_options: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+pub fn default_protocol() -> String {
+    "ssh".to_string()
 }
 
 /// Payload used when creating or updating a host from the frontend.
@@ -81,6 +91,10 @@ pub struct HostInput {
     pub os_icon: Option<String>,
     #[serde(default)]
     pub jump_host_id: Option<String>,
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
+    #[serde(default)]
+    pub protocol_options: Option<String>,
 }
 
 /// A Keychain entry: a named, reusable credential (SSH private key or

@@ -141,6 +141,9 @@ impl Database {
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN os_icon TEXT", []);
         // v0.5.0: bastion / jump host proxyjump
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN jump_host_id TEXT", []);
+        // v0.8.0: remote desktop protocols (VNC) alongside SSH
+        let _ = conn.execute("ALTER TABLE hosts ADD COLUMN protocol TEXT NOT NULL DEFAULT 'ssh'", []);
+        let _ = conn.execute("ALTER TABLE hosts ADD COLUMN protocol_options TEXT", []);
         // folders updated_at
         let _ = conn.execute("ALTER TABLE folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", []);
         let _ = conn.execute("UPDATE folders SET updated_at = created_at WHERE updated_at = ''", []);
@@ -208,7 +211,7 @@ impl Database {
     pub fn list_hosts(&self) -> Result<Vec<Host>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at FROM hosts ORDER BY label ASC"
+            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options FROM hosts ORDER BY label ASC"
         )?;
 
         let hosts = stmt.query_map([], |row| {
@@ -229,6 +232,8 @@ impl Database {
                 jump_host_id: row.get(11)?,
                 created_at: row.get(12)?,
                 updated_at: row.get(13)?,
+                protocol: row.get(14)?,
+                protocol_options: row.get(15)?,
             })
         })?.filter_map(|r| r.ok()).collect();
 
@@ -238,7 +243,7 @@ impl Database {
     pub fn get_host(&self, id: &str) -> Result<Option<Host>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at FROM hosts WHERE id = ?1"
+            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options FROM hosts WHERE id = ?1"
         )?;
 
         let mut rows = stmt.query(params![id])?;
@@ -260,6 +265,8 @@ impl Database {
                 jump_host_id: row.get(11)?,
                 created_at: row.get(12)?,
                 updated_at: row.get(13)?,
+                protocol: row.get(14)?,
+                protocol_options: row.get(15)?,
             }))
         } else {
             Ok(None)
@@ -271,8 +278,8 @@ impl Database {
         let tags_str = serde_json::to_string(&host.tags).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
-            "INSERT INTO hosts (id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+            "INSERT INTO hosts (id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT(id) DO UPDATE SET
                 folder_id=excluded.folder_id,
                 label=excluded.label,
@@ -284,7 +291,9 @@ impl Database {
                 tags=excluded.tags,
                 os_icon=COALESCE(excluded.os_icon, hosts.os_icon),
                 jump_host_id=excluded.jump_host_id,
-                updated_at=excluded.updated_at",
+                updated_at=excluded.updated_at,
+                protocol=excluded.protocol,
+                protocol_options=excluded.protocol_options",
             params![
                 host.id,
                 host.folder_id,
@@ -300,6 +309,8 @@ impl Database {
                 host.jump_host_id,
                 host.created_at,
                 host.updated_at,
+                host.protocol,
+                host.protocol_options,
             ],
         )?;
 
