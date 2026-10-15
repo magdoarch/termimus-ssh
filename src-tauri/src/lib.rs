@@ -37,6 +37,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(state)
+        .setup(|app| {
+            // Logins can ask the user for 2FA codes through the UI.
+            ssh::auth_prompt::init(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::vault_status,
             commands::vault_setup,
@@ -118,6 +123,7 @@ pub fn run() {
             commands::remote_connect,
             commands::remote_input,
             commands::remote_disconnect,
+            commands::ssh_auth_prompt_respond,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")

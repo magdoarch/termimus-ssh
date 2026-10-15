@@ -58,6 +58,9 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Quick Connect**: Instant fuzzy-search launcher accessible anywhere with `Ctrl+K`.
 - **Light & Dark**: Dark, Light or follow-the-system app theme.
 
+### 🔐 Logins, 2FA & Jump Hosts
+- **Two-Factor Login**: Keyboard-interactive prompts (OTP codes, Duo, PAM questions) appear in a dialog.
+
 ### 🖼️ Remote Desktop
 - **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.
 

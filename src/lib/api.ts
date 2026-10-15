@@ -146,6 +146,17 @@ export interface PortForwardRule {
   created_at: string;
 }
 
+/** A keyboard-interactive login prompt (2FA code, PAM question), see ssh::auth_prompt */
+export interface AuthPromptEvent {
+  requestId: string;
+  /** Who is asking, e.g. "root@10.0.0.5" or "admin@bastion (jump host)" */
+  target: string;
+  name: string;
+  instructions: string;
+  /** echo = the answer may be shown while typing (codes) vs hidden (passwords) */
+  prompts: { prompt: string; echo: boolean }[];
+}
+
 /** Payload of the app-wide "tunnel-status" event (see tunnel::TunnelStatus) */
 export interface TunnelStatusEvent {
   ruleId: string;
@@ -464,6 +475,10 @@ export const api = {
     invoke<void>("remote_input", { sessionId, events }),
   remoteDisconnect: (sessionId: string) =>
     invoke<void>("remote_disconnect", { sessionId }),
+
+  /** Answer a login prompt; null cancels that login */
+  respondAuthPrompt: (requestId: string, answers: string[] | null) =>
+    invoke<void>("ssh_auth_prompt_respond", { requestId, answers }),
 
   // Sync auth token + E2EE passphrase, kept in the OS keyring
   syncSecretsSave: (authToken: string, syncPassword: string) =>

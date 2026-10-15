@@ -14,7 +14,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
   - `src/lib/api.ts` — the only place that calls `invoke(...)`; every Tauri command has a typed wrapper here. Add new commands here, not ad-hoc `invoke` calls in components.
   - `src/lib/format.ts` — shared formatting helpers (bytes, dates, paths).
 - **Backend**: Rust in `src-tauri/src/`.
-  - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`).
+  - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`). `auth_prompt.rs`: keyboard-interactive/2FA prompts.
   - `remote/` — VNC (`vnc-rs`) and RDP (IronRDP) sessions.
   - `sftp/` — SFTP manager (`russh-sftp`) + local filesystem helpers.
   - `tunnel/` — local (`-L`), remote (`-R`) and dynamic SOCKS (`-D`) port forwarding.
