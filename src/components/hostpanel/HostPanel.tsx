@@ -1,12 +1,17 @@
 import { useEffect } from "react";
-import { Gauge, X } from "lucide-react";
+import { Container, Gauge, X } from "lucide-react";
+import { api } from "../../lib/api";
 import { dialogOnTop } from "../../lib/dialogs";
 import { useShallow } from "zustand/react/shallow";
 import { useHostPanelStore, type HostPanelTab } from "../../stores/useHostPanelStore";
 import { useHostStore } from "../../stores/useHostStore";
 import { HostStatsView } from "./HostStatsView";
+import { DockerView } from "./DockerView";
 
-const TABS: { id: HostPanelTab; label: string; icon: typeof Gauge }[] = [{ id: "overview", label: "Overview", icon: Gauge }];
+const TABS: { id: HostPanelTab; label: string; icon: typeof Gauge }[] = [
+  { id: "overview", label: "Overview", icon: Gauge },
+  { id: "docker", label: "Docker", icon: Container },
+];
 
 /** Server dashboard of an SSH host, over its (shared) SSH connection. */
 export function HostPanel() {
@@ -14,6 +19,18 @@ export function HostPanel() {
     useShallow((s) => ({ hostId: s.hostId, tab: s.tab, setTab: s.setTab, close: s.close }))
   );
   const host = useHostStore((s) => s.hosts.find((h) => h.id === hostId));
+
+  // One login for everything the panel does while it is open.
+  useEffect(() => {
+    if (!hostId) return;
+    const leaseId = `panel-${hostId}-${Math.random().toString(36).slice(2, 8)}`;
+    const holding = api.holdHostConnection(hostId, leaseId).catch(() => {});
+    return () => {
+      // After the hold settles: a release that overtakes a slow login would
+      // leave the connection held for good.
+      holding.finally(() => api.releaseHostConnection(leaseId).catch(() => {}));
+    };
+  }, [hostId]);
 
   useEffect(() => {
     if (!hostId) return;
@@ -67,7 +84,10 @@ export function HostPanel() {
             </button>
           </div>
         </div>
-        <div className="min-h-0 overflow-y-auto p-5">{tab === "overview" && <HostStatsView hostId={host.id} />}</div>
+        <div className="min-h-0 overflow-y-auto p-5">
+          {tab === "overview" && <HostStatsView hostId={host.id} />}
+          {tab === "docker" && <DockerView hostId={host.id} />}
+        </div>
       </div>
     </div>
   );

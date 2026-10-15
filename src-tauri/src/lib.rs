@@ -32,9 +32,11 @@ pub fn run() {
     let pty = Arc::new(PtyManager::new());
     let remote = Arc::new(RemoteDesktopManager::new());
     let pool = Arc::new(ssh::ConnectionPool::new());
+    let panel_pool = Arc::new(ssh::ConnectionPool::new());
     let monitor = Arc::new(hostinfo::HostMonitor::default());
+    let leases = Arc::new(hostinfo::ConnectionLeases::default());
 
-    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool, monitor };
+    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool, panel_pool, monitor, leases };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -136,6 +138,12 @@ pub fn run() {
             commands::ssh_install_public_key,
             commands::host_monitor_start,
             commands::host_monitor_stop,
+            commands::host_connection_hold,
+            commands::host_connection_release,
+            commands::docker_list,
+            commands::docker_stats,
+            commands::docker_action,
+            commands::docker_logs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")
@@ -147,10 +155,15 @@ pub fn run() {
                 let ssh = app_handle.state::<AppState>().ssh.clone();
                 let remote = app_handle.state::<AppState>().remote.clone();
                 let pool = app_handle.state::<AppState>().pool.clone();
+                let panel_pool = app_handle.state::<AppState>().panel_pool.clone();
                 tauri::async_runtime::block_on(async move {
                     remote.disconnect_all().await;
                     ssh.disconnect_all().await;
-                    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), pool.disconnect_all()).await;
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                        pool.disconnect_all().await;
+                        panel_pool.disconnect_all().await;
+                    })
+                    .await;
                 });
             }
         });

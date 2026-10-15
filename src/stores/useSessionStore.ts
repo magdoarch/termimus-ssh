@@ -34,18 +34,28 @@ export interface SshTab {
   isLocal?: boolean;
   /** Set for remote desktop tabs; undefined means an SSH or local terminal */
   protocol?: RemoteDesktopProtocol;
+  /** Run this instead of the login shell (e.g. `docker exec -it …`) */
+  command?: string;
+}
+
+/** Extras for a new SSH tab. */
+export interface SessionOptions {
+  command?: string;
+  /** Tab title instead of the host label */
+  label?: string;
 }
 
 /** Tabs backed by a shell (SSH or local PTY) that accept typed text. */
 export const isTerminalTab = (tab: SshTab | undefined) => Boolean(tab) && !tab!.protocol;
 
 /** Tab shown for a saved host: an SSH terminal or a VNC remote desktop. */
-function tabForHost(sessionId: string, host: Host): SshTab {
+function tabForHost(sessionId: string, host: Host, options?: SessionOptions): SshTab {
   const protocol = isSshHost(host) ? undefined : (host.protocol as RemoteDesktopProtocol);
   return {
     id: sessionId,
     hostId: host.id,
-    hostLabel: host.label,
+    hostLabel: options?.label ?? host.label,
+    ...(options?.command ? { command: options.command } : {}),
     hostAddress: host.username ? `${host.username}@${host.address}` : `${host.address}:${host.port}`,
     connected: false,
     connecting: true,
@@ -94,7 +104,7 @@ interface SessionState {
   getBroadcastTargetSessionIds: (sessionId: string) => string[];
 
   // Session lifecycle
-  openSession: (host: Host, newGroup?: boolean) => Promise<string>;
+  openSession: (host: Host, newGroup?: boolean, options?: SessionOptions) => Promise<string>;
   openLocalSession: (newGroup?: boolean) => Promise<string>;
   openLocalSessionInSplit: (
     targetPaneId: string,
@@ -180,9 +190,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   broadcastGroupIds: [],
 
-  openSession: async (host: Host, newGroup = true) => {
+  openSession: async (host: Host, newGroup = true, options?: SessionOptions) => {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const newTab = tabForHost(sessionId, host);
+    const newTab = tabForHost(sessionId, host, options);
 
     set((state) => {
       // If newGroup is requested (e.g. from HostList / Header + button) or no groups exist:

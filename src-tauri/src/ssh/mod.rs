@@ -531,6 +531,7 @@ impl SessionManager {
         route: Route,
         cols: u16,
         rows: u16,
+        command: Option<String>,
     ) -> Result<(), String> {
         // Prevent duplicate concurrent connection attempts for the exact same session_id
         {
@@ -552,7 +553,7 @@ impl SessionManager {
         self.sessions.write().await.remove(&session_id);
 
         let res = self
-            .do_connect(app, db, pool, session_id.clone(), host_id, route, cols, rows)
+            .do_connect(app, db, pool, session_id.clone(), host_id, route, cols, rows, command)
             .await;
 
         {
@@ -598,6 +599,7 @@ impl SessionManager {
         route: Route,
         cols: u16,
         rows: u16,
+        command: Option<String>,
     ) -> Result<(), String> {
         self.check_cancelled(&session_id).await?;
 
@@ -648,10 +650,17 @@ impl SessionManager {
                 .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
                 .await
                 .map_err(|e| fail(4, format!("PTY request failed: {e}")))?;
-            channel
-                .request_shell(true)
-                .await
-                .map_err(|e| fail(4, format!("Shell request failed: {e}")))?;
+            // A tab can run a command (e.g. `docker exec -it`) instead of the login shell.
+            match &command {
+                Some(command) => channel
+                    .exec(true, command.as_str())
+                    .await
+                    .map_err(|e| fail(4, format!("Command request failed: {e}")))?,
+                None => channel
+                    .request_shell(true)
+                    .await
+                    .map_err(|e| fail(4, format!("Shell request failed: {e}")))?,
+            }
             // Last checkpoint before registration: past this point the session is
             // live in the map, so a late cancel is handled by the connect() wrapper.
             self.check_cancelled(&session_id).await

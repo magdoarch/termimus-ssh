@@ -1,6 +1,7 @@
 //! Live information about SSH hosts, gathered with exec channels on their
-//! (shared) connection: server stats here.
+//! (shared) connection: server stats here, Docker containers in `docker`.
 
+pub mod docker;
 pub mod stats;
 
 use std::collections::HashMap;
@@ -25,6 +26,23 @@ const MIN_INTERVAL: Duration = Duration::from_secs(1);
 pub struct MonitorEvent {
     pub stats: Option<stats::HostStats>,
     pub error: Option<String>,
+}
+
+/// Connections kept open while a panel (dashboard, Docker) is shown, so its
+/// calls reuse one login instead of connecting each time.
+#[derive(Default)]
+pub struct ConnectionLeases {
+    held: Mutex<HashMap<String, Arc<SshConnection>>>,
+}
+
+impl ConnectionLeases {
+    pub async fn hold(&self, lease_id: String, connection: Arc<SshConnection>) {
+        self.held.lock().await.insert(lease_id, connection);
+    }
+
+    pub async fn release(&self, lease_id: &str) {
+        self.held.lock().await.remove(lease_id);
+    }
 }
 
 /// Running stats monitors, by the id the UI gave them.

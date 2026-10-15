@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type HostPanelTab = "overview";
+export type HostPanelTab = "overview" | "docker";
 
 interface HostPanelState {
   hostId: string | null;

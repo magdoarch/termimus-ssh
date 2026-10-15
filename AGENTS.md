@@ -16,7 +16,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
 - **Backend**: Rust in `src-tauri/src/`.
   - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`). `conn.rs`: connection pool and jump-host routes; `auth_prompt.rs`: keyboard-interactive/2FA prompts; `totp.rs`: RFC 6238 codes; `e2e_tests.rs`: ignored tests against a real sshd (`SSH_TEST_*` env).
   - `sshconfig/` — `~/.ssh/config` + `known_hosts` parsing and the import.
-  - `hostinfo/` — server stats over exec channels on the shared connection.
+  - `hostinfo/` — server stats and Docker over exec channels on the shared connection.
   - `remote/` — VNC (`vnc-rs`) and RDP (IronRDP) sessions.
   - `sftp/` — SFTP manager (`russh-sftp`) + local filesystem helpers.
   - `tunnel/` — local (`-L`), remote (`-R`) and dynamic SOCKS (`-D`) port forwarding.
