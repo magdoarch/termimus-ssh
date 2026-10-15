@@ -30,15 +30,13 @@ const MIN_MASTER_PASSWORD_LEN: usize = 8;
 /// Run CPU-heavy work (Argon2 key derivation, whole-database export/import)
 /// on the blocking pool. Sync Tauri commands run on the main thread and would
 /// freeze the UI; inline in an async command it would stall a runtime worker.
-async fn run_blocking<T, F>(state: &AppState, f: F) -> Result<T, String>
+async fn run_blocking_with_state<T, F>(state: &AppState, f: F) -> Result<T, String>
 where
     T: Send + 'static,
     F: FnOnce(&AppState) -> Result<T, String> + Send + 'static,
 {
     let state = state.clone();
-    tauri::async_runtime::spawn_blocking(move || f(&state))
-        .await
-        .map_err(|e| format!("Background task failed: {e}"))?
+    run_blocking(move || f(&state)).await
 }
 
 /// Check a derived key against the stored verifier without installing it.
@@ -81,7 +79,7 @@ pub fn vault_status(state: State<AppState>) -> Result<VaultStatus, String> {
 
 #[tauri::command]
 pub async fn vault_setup(state: State<'_, AppState>, password: String) -> Result<(), String> {
-    run_blocking(&state, move |state| vault_setup_blocking(state, password)).await
+    run_blocking_with_state(&state, move |state| vault_setup_blocking(state, password)).await
 }
 
 fn vault_setup_blocking(state: &AppState, mut password: String) -> Result<(), String> {
@@ -115,7 +113,7 @@ fn vault_setup_blocking(state: &AppState, mut password: String) -> Result<(), St
 
 #[tauri::command]
 pub async fn vault_unlock(state: State<'_, AppState>, password: String) -> Result<bool, String> {
-    run_blocking(&state, move |state| vault_unlock_blocking(state, password)).await
+    run_blocking_with_state(&state, move |state| vault_unlock_blocking(state, password)).await
 }
 
 fn vault_unlock_blocking(state: &AppState, mut password: String) -> Result<bool, String> {
@@ -282,7 +280,7 @@ pub async fn vault_change_password(
     old_password: String,
     new_password: String,
 ) -> Result<(), String> {
-    run_blocking(&state, move |state| {
+    run_blocking_with_state(&state, move |state| {
         vault_change_password_blocking(state, zeroize::Zeroizing::new(old_password), zeroize::Zeroizing::new(new_password))
     })
     .await
@@ -1444,7 +1442,7 @@ pub fn known_host_delete(
 /// a plain `BackupBundle`.
 #[tauri::command]
 pub async fn backup_export(state: State<'_, AppState>, passphrase: Option<String>) -> Result<String, String> {
-    run_blocking(&state, move |state| backup_export_blocking(state, passphrase)).await
+    run_blocking_with_state(&state, move |state| backup_export_blocking(state, passphrase)).await
 }
 
 fn backup_export_blocking(state: &AppState, passphrase: Option<String>) -> Result<String, String> {
@@ -1486,7 +1484,7 @@ pub async fn backup_import(
     replace_all: bool,
     passphrase: Option<String>,
 ) -> Result<ImportSummary, String> {
-    run_blocking(&state, move |state| {
+    run_blocking_with_state(&state, move |state| {
         backup_import_blocking(state, backup_json, replace_all, passphrase)
     })
     .await
@@ -1755,7 +1753,7 @@ pub async fn sync_push(
     }
 
     let password = password.to_string();
-    let encrypted_blob = run_blocking(&state, move |state| backup_export_blocking(state, Some(password))).await?;
+    let encrypted_blob = run_blocking_with_state(&state, move |state| backup_export_blocking(state, Some(password))).await?;
 
     let base = server_url.trim_end_matches('/');
     let client = sync_http_client()?;
@@ -1841,7 +1839,7 @@ pub async fn sync_pull(
 
     let password = password.to_string();
     let replace_all = replace_all.unwrap_or(false);
-    let mut summary = run_blocking(&state, move |state| {
+    let mut summary = run_blocking_with_state(&state, move |state| {
         backup_import_blocking(state, encrypted_blob, replace_all, Some(password))
     })
     .await?;
