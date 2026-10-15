@@ -8,7 +8,7 @@ import {
   CopyPlus,
   MoreVertical,
 } from "lucide-react";
-import { Host } from "../../lib/api";
+import { Host, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
 import { DistroBadge } from "./DistroBadge";
 
 export interface HostListRowProps {
@@ -88,12 +88,12 @@ export const HostListRow = memo(function HostListRow({
         <span className="truncate text-xs font-semibold text-[var(--text-primary)] group-hover:text-[var(--primary)] transition-colors">
           {host.label}
         </span>
-        {host.protocol === "vnc" && (
+        {!isSshHost(host) && (
           <span
             className="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono font-medium bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30"
-            title="VNC remote desktop"
+            title={`${PROTOCOL_LABELS[host.protocol]} remote desktop`}
           >
-            vnc
+            {host.protocol}
           </span>
         )}
         {host.jump_host_id && (
@@ -144,7 +144,7 @@ export const HostListRow = memo(function HostListRow({
       {/* 6. Column: Quick Action buttons + 3-dots menu */}
       <div className="flex items-center gap-1 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
         {/* Quick action: SFTP (SSH hosts only) */}
-        {host.protocol !== "vnc" && (
+        {isSshHost(host) && (
           <button
             onClick={(e) => onSftp(e, host)}
             title="SFTP Browser"
@@ -174,10 +174,10 @@ export const HostListRow = memo(function HostListRow({
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition"
               >
                 <Terminal size={13} />
-                <span>{host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
+                <span>Connect {PROTOCOL_LABELS[host.protocol ?? "ssh"]}</span>
               </button>
 
-              {host.protocol !== "vnc" && (
+              {isSshHost(host) && (
                 <button
                   onClick={(e) => {
                     onToggleMenu(host.id);

@@ -21,7 +21,13 @@ export interface Host {
   updated_at: string;
 }
 
-export type HostProtocol = "ssh" | "vnc";
+export type HostProtocol = "ssh" | "vnc" | "rdp";
+export type RemoteDesktopProtocol = Exclude<HostProtocol, "ssh">;
+
+export const PROTOCOL_LABELS: Record<HostProtocol, string> = { ssh: "SSH", vnc: "VNC", rdp: "RDP" };
+
+/** SSH hosts support terminal, SFTP, tunnels and acting as a jump host. */
+export const isSshHost = (host: Pick<Host, "protocol">) => (host.protocol ?? "ssh") === "ssh";
 /** "none" is only valid for VNC servers without authentication */
 export type HostAuthMethod = "password" | "private_key" | "agent" | "none";
 
@@ -32,11 +38,17 @@ export interface VncOptions {
   exclusive?: boolean;
 }
 
-export const DEFAULT_PORTS: Record<HostProtocol, number> = { ssh: 22, vnc: 5900 };
+/** Stored in Host.protocol_options for RDP hosts */
+export interface RdpOptions {
+  domain?: string;
+  viewOnly?: boolean;
+}
+
+export const DEFAULT_PORTS: Record<HostProtocol, number> = { ssh: 22, vnc: 5900, rdp: 3389 };
 
 /** Input forwarded to a remote desktop session (see src-tauri/src/remote/input.rs) */
 export type RemoteInputEvent =
-  | { type: "key"; keysym: number; down: boolean }
+  | { type: "key"; keysym: number; down: boolean; scancode?: number }
   | { type: "pointer"; x: number; y: number; buttons: number }
   | { type: "clipboard"; text: string }
   | { type: "refresh" };
@@ -427,8 +439,19 @@ export const api = {
     }),
   // Remote desktop (VNC). Frames arrive on `onFrame` as binary batches
   // decoded by src/lib/remoteFrame.ts.
-  remoteConnect: (hostId: string, sessionId: string, onFrame: Channel<ArrayBuffer>) =>
-    invoke<void>("remote_connect", { hostId, sessionId, onFrame }),
+  remoteConnect: (
+    hostId: string,
+    sessionId: string,
+    onFrame: Channel<ArrayBuffer>,
+    size?: { width: number; height: number }
+  ) =>
+    invoke<void>("remote_connect", {
+      hostId,
+      sessionId,
+      onFrame,
+      width: size?.width ?? null,
+      height: size?.height ?? null,
+    }),
   remoteInput: (sessionId: string, events: RemoteInputEvent[]) =>
     invoke<void>("remote_input", { sessionId, events }),
   remoteDisconnect: (sessionId: string) =>

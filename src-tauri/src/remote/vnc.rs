@@ -78,7 +78,7 @@ pub async fn run(
                     continue;
                 }
                 let event = match input {
-                    RemoteInput::Key { keysym, down } => X11Event::KeyEvent((keysym, down).into()),
+                    RemoteInput::Key { keysym, down, .. } => X11Event::KeyEvent((keysym, down).into()),
                     RemoteInput::Pointer { x, y, buttons } => X11Event::PointerEvent((x, y, buttons).into()),
                     RemoteInput::Clipboard { text } => X11Event::CopyText(to_latin1_lossy(&text)),
                     RemoteInput::Refresh => X11Event::FullRefresh,

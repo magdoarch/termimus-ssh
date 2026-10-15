@@ -37,7 +37,7 @@ interface ConnectionProgressProps {
   onRetry: () => void;
   onClose: () => void;
   /** Selects the stage labels; defaults to SSH */
-  protocol?: "ssh" | "vnc";
+  protocol?: "ssh" | "vnc" | "rdp";
 }
 
 const SSH_STAGES = [
@@ -45,6 +45,13 @@ const SSH_STAGES = [
   { step: 2, label: "Host Key", icon: ShieldCheck },
   { step: 3, label: "Auth", icon: KeyRound },
   { step: 4, label: "Shell", icon: TerminalIcon },
+];
+
+const RDP_STAGES = [
+  { step: 1, label: "Socket", icon: Plug },
+  { step: 2, label: "Certificate", icon: ShieldCheck },
+  { step: 3, label: "Auth", icon: KeyRound },
+  { step: 4, label: "Desktop", icon: Monitor },
 ];
 
 const VNC_STAGES = [
@@ -123,7 +130,7 @@ export function ConnectionProgress({
     }
   }, [currentStep, isFailed]);
 
-  const stages = protocol === "vnc" ? VNC_STAGES : SSH_STAGES;
+  const stages = protocol === "vnc" ? VNC_STAGES : protocol === "rdp" ? RDP_STAGES : SSH_STAGES;
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[var(--canvas)] p-6 text-[var(--text-primary)] select-none">

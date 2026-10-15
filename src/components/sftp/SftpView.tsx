@@ -13,7 +13,7 @@ import { SelectMods, useSftpStore } from "../../stores/useSftpStore";
 import { useHostStore } from "../../stores/useHostStore";
 import { FilePane } from "./FilePane";
 import { FileEditorModal } from "./FileEditorModal";
-import { FileEntry } from "../../lib/api";
+import { FileEntry, isSshHost } from "../../lib/api";
 import { CustomSelect } from "../ui/CustomSelect";
 
 function transferButtonTitle(files: FileEntry[], verb: "Upload" | "Download"): string {
@@ -192,7 +192,7 @@ export function SftpView() {
               placeholder="Select a host to connect..."
               options={[
                 { value: "", label: "Select a host to connect..." },
-                ...hosts.filter((h) => h.protocol !== "vnc").map((h) => ({
+                ...hosts.filter(isSshHost).map((h) => ({
                   value: h.id,
                   label: h.label,
                   description: `(${h.username}@${h.address})`,
