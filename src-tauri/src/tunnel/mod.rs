@@ -685,6 +685,7 @@ mod tests {
                 port: ssh_port,
                 username: user.clone(),
                 auth: crate::ssh::SshAuth::PrivateKey { pem: pem.clone(), passphrase: None },
+                totp: None,
             }]
         };
         let pool = ConnectionPool::new();

@@ -30,6 +30,26 @@ struct ServerPolicy {
     password_method: Option<&'static str>,
     /// Accepted on its own.
     accepted_key: Option<PublicKey>,
+    /// Asked like `otp`, checked against the current (or previous) TOTP code.
+    otp_totp: Option<super::totp::Totp>,
+}
+
+enum Expected {
+    Exact(&'static str),
+    Totp(super::totp::Totp),
+}
+
+impl Expected {
+    fn accepts(&self, answer: &str) -> bool {
+        match self {
+            Expected::Exact(expected) => answer == *expected,
+            // Like real servers, one step of clock skew is fine.
+            Expected::Totp(totp) => {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+                [now, now - totp.period].iter().any(|&time| totp.code_at(time) == answer)
+            }
+        }
+    }
 }
 
 struct TestServer {
@@ -86,14 +106,19 @@ impl server::Handler for TestServer {
         response: Option<server::Response<'a>>,
     ) -> Result<Auth, Self::Error> {
         let mut prompts: Vec<(Cow<'static, str>, bool)> = Vec::new();
-        let mut expected: Vec<&str> = Vec::new();
+        let mut expected: Vec<Expected> = Vec::new();
         if let Some(password) = self.policy.password {
             prompts.push(("Password: ".into(), false));
-            expected.push(password);
+            expected.push(Expected::Exact(password));
         }
         if let Some(otp) = self.policy.otp {
             prompts.push(("Verification code: ".into(), true));
-            expected.push(otp);
+            expected.push(Expected::Exact(otp));
+        }
+        if let Some(totp) = &self.policy.otp_totp {
+            // libpam-google-authenticator's prompt, not echoed.
+            prompts.push(("Verification code: ".into(), false));
+            expected.push(Expected::Totp(totp.clone()));
         }
         if prompts.is_empty() {
             // Nothing configured to ask: keyboard-interactive isn't a way in.
@@ -107,7 +132,7 @@ impl server::Handler for TestServer {
             }),
             Some(response) => {
                 let answers: Vec<String> = response.map(|b| String::from_utf8_lossy(&b).into_owned()).collect();
-                if answers == expected {
+                if answers.len() == expected.len() && answers.iter().zip(&expected).all(|(a, e)| e.accepts(a)) {
                     Ok(Auth::Accept)
                 } else {
                     Ok(Auth::Reject { proceed_with_methods: None, partial_success: false })
@@ -172,6 +197,15 @@ impl AuthPrompter for ScriptedUser {
 }
 
 async fn login(port: u16, auth: SshAuth, user: &ScriptedUser) -> Result<bool, String> {
+    login_with_totp(port, auth, None, user).await
+}
+
+async fn login_with_totp(
+    port: u16,
+    auth: SshAuth,
+    totp: Option<&super::totp::Totp>,
+    user: &ScriptedUser,
+) -> Result<bool, String> {
     let handler = SshClientHandler {
         address: "127.0.0.1".into(),
         port,
@@ -180,7 +214,7 @@ async fn login(port: u16, auth: SshAuth, user: &ScriptedUser) -> Result<bool, St
     };
     let tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     let mut handle = client::connect_stream(default_client_config(), tcp, handler).await.unwrap();
-    authenticate_with(&mut handle, "alice", &auth, "alice@test", user).await
+    authenticate_with(&mut handle, "alice", &auth, totp, "alice@test", user).await
 }
 
 fn password(p: &str) -> SshAuth {
@@ -289,4 +323,19 @@ async fn encrypted_key_without_saved_passphrase_asks_for_it() {
     let user = ScriptedUser::answering(Some(&["hunter2"]));
     assert_eq!(login(port, SshAuth::PrivateKey { pem, passphrase: None }, &user).await, Ok(true));
     assert_eq!(user.asked_prompts(), vec![vec![("Passphrase".to_string(), false)]]);
+}
+
+#[tokio::test]
+async fn saved_totp_secret_answers_the_code_prompt() {
+    let totp = super::totp::Totp::parse("JBSWY3DPEHPK3PXP").unwrap();
+    let port = spawn_server(ServerPolicy { password: Some("pw"), otp_totp: Some(totp.clone()), ..Default::default() }).await;
+    // No dialog: the password and the code are both filled in.
+    let user = ScriptedUser::answering(None);
+    assert_eq!(login_with_totp(port, password("pw"), Some(&totp), &user).await, Ok(true));
+    assert!(user.asked_prompts().is_empty());
+
+    // A wrong secret's code is rejected; the login fails instead of looping.
+    let wrong = super::totp::Totp::parse("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ").unwrap();
+    let user = ScriptedUser::answering(None);
+    assert_eq!(login_with_totp(port, password("pw"), Some(&wrong), &user).await, Ok(false));
 }

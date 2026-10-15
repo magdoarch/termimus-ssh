@@ -129,6 +129,8 @@ pub fn run() {
             commands::remote_disconnect,
             commands::ssh_auth_prompt_respond,
             commands::ssh_set_connection_sharing,
+            commands::totp_preview,
+            commands::host_totp_code,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")

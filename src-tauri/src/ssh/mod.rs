@@ -20,6 +20,7 @@ pub mod auth_prompt;
 #[cfg(test)]
 mod auth_tests;
 pub mod conn;
+pub mod totp;
 #[cfg(test)]
 pub(crate) mod e2e_tests;
 
@@ -325,9 +326,10 @@ async fn authenticate(
     handle: &mut Handle<SshClientHandler>,
     username: &str,
     auth: &SshAuth,
+    totp: Option<&totp::Totp>,
     target: &str,
 ) -> Result<bool, String> {
-    authenticate_with(handle, username, auth, target, &UiPrompter).await
+    authenticate_with(handle, username, auth, totp, target, &UiPrompter).await
 }
 
 /// Authenticate with the stored password or key, then continue with
@@ -340,6 +342,7 @@ pub(crate) async fn authenticate_with<P: AuthPrompter>(
     handle: &mut Handle<SshClientHandler>,
     username: &str,
     auth: &SshAuth,
+    totp: Option<&totp::Totp>,
     target: &str,
     prompter: &P,
 ) -> Result<bool, String> {
@@ -361,7 +364,7 @@ pub(crate) async fn authenticate_with<P: AuthPrompter>(
     match first {
         AuthResult::Success => Ok(true),
         AuthResult::Failure { remaining_methods, .. } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
-            keyboard_interactive(handle, username, password, target, prompter).await
+            keyboard_interactive(handle, username, password, totp.cloned(), target, prompter).await
         }
         AuthResult::Failure { .. } => Ok(false),
     }
@@ -444,6 +447,7 @@ async fn keyboard_interactive<P: AuthPrompter>(
     handle: &mut Handle<SshClientHandler>,
     username: &str,
     mut stored_password: Option<Zeroizing<String>>,
+    mut totp: Option<totp::Totp>,
     target: &str,
     prompter: &P,
 ) -> Result<bool, String> {
@@ -462,7 +466,7 @@ async fn keyboard_interactive<P: AuthPrompter>(
                     .into_iter()
                     .map(|p| PromptField { prompt: p.prompt, echo: p.echo })
                     .collect();
-                let (mut answers, ask) = auth_prompt::plan_answers(&fields, &mut stored_password);
+                let (mut answers, ask) = auth_prompt::plan_answers(&fields, &mut stored_password, &mut totp);
                 if !ask.is_empty() {
                     let request = AuthPromptRequest {
                         target: target.to_string(),

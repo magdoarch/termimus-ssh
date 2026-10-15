@@ -15,6 +15,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::oneshot;
 use zeroize::Zeroizing;
 
+use super::totp::Totp;
+
 /// sshd's default LoginGraceTime: the server gives up after this anyway.
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -106,19 +108,43 @@ impl AuthPrompter for UiPrompter {
     }
 }
 
+/// The account password, not a one-time one ("One-time password (OATH)").
 pub fn is_password_prompt(prompt: &str) -> bool {
-    prompt.to_lowercase().contains("password")
+    prompt.to_lowercase().contains("password") && !is_one_time_code_prompt(prompt)
 }
 
-/// Fill what we can without asking: the stored password goes into the first
-/// hidden "password" prompt, once per login (a repeated password prompt means
-/// it was wrong, so the user is asked instead). Returns the pre-filled answers
-/// and the indices of the prompts the user must answer.
-pub fn plan_answers(prompts: &[PromptField], stored_password: &mut Option<Zeroizing<String>>) -> (Vec<Option<String>>, Vec<usize>) {
+/// "Verification code:", "OTP:", "Token:", pam_oath's "One-time password",
+/// Duo's "Passcode or option"...
+pub fn is_one_time_code_prompt(prompt: &str) -> bool {
+    let prompt = prompt.to_lowercase();
+    [
+        "code", "otp", "oath", "token", "passcode", "authenticator", "2fa", "two-factor", "one-time", "one time",
+    ]
+    .iter()
+    .any(|word| prompt.contains(word))
+}
+
+/// Fill what we can without asking, each once per login (asked again means
+/// it was wrong, so the user answers instead): the stored password goes into
+/// the first hidden "password" prompt, the host's current TOTP code into the
+/// first one-time-code prompt. Returns the pre-filled answers and the indices
+/// of the prompts the user must answer.
+pub fn plan_answers(
+    prompts: &[PromptField],
+    stored_password: &mut Option<Zeroizing<String>>,
+    totp: &mut Option<Totp>,
+) -> (Vec<Option<String>>, Vec<usize>) {
     let mut answers: Vec<Option<String>> = vec![None; prompts.len()];
     if let Some(index) = prompts.iter().position(|p| !p.echo && is_password_prompt(&p.prompt)) {
         if let Some(password) = stored_password.take() {
             answers[index] = Some(password.to_string());
+        }
+    }
+    if let Some(index) = prompts.iter().position(|p| is_one_time_code_prompt(&p.prompt)) {
+        if answers[index].is_none() {
+            if let Some(totp) = totp.take() {
+                answers[index] = Some(totp.current().code);
+            }
         }
     }
     let ask = (0..prompts.len()).filter(|&i| answers[i].is_none()).collect();
@@ -137,13 +163,13 @@ mod tests {
     fn stored_password_fills_password_prompt_once() {
         let prompts = [field("Password: ", false), field("Verification code: ", true)];
         let mut stored = Some(Zeroizing::new("s3cret".to_string()));
-        let (answers, ask) = plan_answers(&prompts, &mut stored);
+        let (answers, ask) = plan_answers(&prompts, &mut stored, &mut None);
         assert_eq!(answers[0].as_deref(), Some("s3cret"));
         assert_eq!(ask, vec![1]);
         assert!(stored.is_none());
 
         // PAM asks again (wrong password): now the user answers.
-        let (answers, ask) = plan_answers(&prompts[..1], &mut stored);
+        let (answers, ask) = plan_answers(&prompts[..1], &mut stored, &mut None);
         assert_eq!(answers, vec![None]);
         assert_eq!(ask, vec![0]);
     }
@@ -153,9 +179,32 @@ mod tests {
         let mut stored = Some(Zeroizing::new("pw".to_string()));
         // An echoed prompt mentioning "password" is not a password field.
         let prompts = [field("Duo passcode or option (1-2): ", true), field("Password hint (visible): ", true)];
-        let (answers, ask) = plan_answers(&prompts, &mut stored);
+        let (answers, ask) = plan_answers(&prompts, &mut stored, &mut None);
         assert!(answers.iter().all(Option::is_none));
         assert_eq!(ask, vec![0, 1]);
         assert!(stored.is_some(), "password kept for a later round");
+    }
+
+    #[test]
+    fn totp_code_fills_the_code_prompt_once() {
+        let prompts = [field("Password: ", false), field("Verification code: ", false)];
+        let mut stored = Some(Zeroizing::new("pw".to_string()));
+        let mut totp = Some(Totp::parse("JBSWY3DPEHPK3PXP").unwrap());
+        let (answers, ask) = plan_answers(&prompts, &mut stored, &mut totp);
+        assert_eq!(answers[0].as_deref(), Some("pw"));
+        assert_eq!(answers[1].as_ref().map(String::len), Some(6));
+        assert!(ask.is_empty() && totp.is_none());
+
+        // Rejected and asked again: the user types it.
+        let (answers, ask) = plan_answers(&prompts[1..], &mut stored, &mut totp);
+        assert_eq!((answers, ask), (vec![None], vec![0]));
+
+        assert!(is_one_time_code_prompt("Duo two-factor login: Passcode or option (1-3): "));
+        assert!(is_one_time_code_prompt("OTP: "));
+        assert!(!is_one_time_code_prompt("Password: "));
+        // pam_oath: a one-time password is not the account password.
+        assert!(is_one_time_code_prompt("One-time password (OATH) for `alice': "));
+        assert!(!is_password_prompt("One-time password (OATH) for `alice': "));
+        assert!(is_password_prompt("alice@host's password: "));
     }
 }

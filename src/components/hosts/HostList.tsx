@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Check,
   FileInput,
+  ShieldCheck,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useHostStore } from "../../stores/useHostStore";
@@ -30,7 +31,7 @@ import { useConfirmStore } from "../../stores/useConfirmStore";
 import { useVaultStore } from "../../stores/useVaultStore";
 import { FolderModal } from "./FolderModal";
 import { SshConfigImportModal } from "./SshConfigImportModal";
-import { Host, Folder, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
+import { api, Host, Folder, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
 import { DistroBadge } from "./DistroBadge";
 import { HostListRow } from "./HostListRow";
 import { copyText } from "../../lib/clipboard";
@@ -845,6 +846,29 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 <Copy size={13} />
                 <span>Copy Address</span>
               </button>
+
+              {/* Copy the current 2FA code (saved TOTP secret) */}
+              {contextMenu.host!.totp_credential_id && (
+                <button
+                  onClick={async () => {
+                    const hostId = contextMenu.host!.id;
+                    setContextMenu(null);
+                    try {
+                      const code = await api.hostTotpCode(hostId);
+                      if (code) {
+                        await copyText(code.code);
+                        showCopyToast(`Copied 2FA code (valid ${code.remaining}s)`);
+                      }
+                    } catch (e) {
+                      showCopyToast(String(e));
+                    }
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <ShieldCheck size={13} />
+                  <span>Copy 2FA Code</span>
+                </button>
+              )}
 
               <div className="my-1 h-[1px] bg-[var(--border)]" />
 

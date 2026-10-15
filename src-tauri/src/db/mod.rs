@@ -156,6 +156,8 @@ impl Database {
         // v0.8.0: remote desktop protocols (VNC) alongside SSH
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN protocol TEXT NOT NULL DEFAULT 'ssh'", []);
         let _ = conn.execute("ALTER TABLE hosts ADD COLUMN protocol_options TEXT", []);
+        // 2FA (TOTP) secret per host, a credential of kind "totp"
+        let _ = conn.execute("ALTER TABLE hosts ADD COLUMN totp_credential_id TEXT", []);
         // folders updated_at
         let _ = conn.execute("ALTER TABLE folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''", []);
         let _ = conn.execute("UPDATE folders SET updated_at = created_at WHERE updated_at = ''", []);
@@ -223,7 +225,7 @@ impl Database {
     pub fn list_hosts(&self) -> Result<Vec<Host>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options FROM hosts ORDER BY label ASC"
+            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options, totp_credential_id FROM hosts ORDER BY label ASC"
         )?;
 
         let hosts = stmt.query_map([], |row| {
@@ -246,6 +248,7 @@ impl Database {
                 updated_at: row.get(13)?,
                 protocol: row.get(14)?,
                 protocol_options: row.get(15)?,
+                totp_credential_id: row.get(16)?,
             })
         })?.filter_map(|r| r.ok()).collect();
 
@@ -255,7 +258,7 @@ impl Database {
     pub fn get_host(&self, id: &str) -> Result<Option<Host>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options FROM hosts WHERE id = ?1"
+            "SELECT id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options, totp_credential_id FROM hosts WHERE id = ?1"
         )?;
 
         let mut rows = stmt.query(params![id])?;
@@ -279,6 +282,7 @@ impl Database {
                 updated_at: row.get(13)?,
                 protocol: row.get(14)?,
                 protocol_options: row.get(15)?,
+                totp_credential_id: row.get(16)?,
             }))
         } else {
             Ok(None)
@@ -290,8 +294,8 @@ impl Database {
         let tags_str = serde_json::to_string(&host.tags).unwrap_or_else(|_| "[]".to_string());
 
         conn.execute(
-            "INSERT INTO hosts (id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            "INSERT INTO hosts (id, folder_id, label, address, port, username, auth_method, credential_id, tags, last_connected_at, os_icon, jump_host_id, created_at, updated_at, protocol, protocol_options, totp_credential_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
              ON CONFLICT(id) DO UPDATE SET
                 folder_id=excluded.folder_id,
                 label=excluded.label,
@@ -305,7 +309,8 @@ impl Database {
                 jump_host_id=excluded.jump_host_id,
                 updated_at=excluded.updated_at,
                 protocol=excluded.protocol,
-                protocol_options=excluded.protocol_options",
+                protocol_options=excluded.protocol_options,
+                totp_credential_id=excluded.totp_credential_id",
             params![
                 host.id,
                 host.folder_id,
@@ -323,6 +328,7 @@ impl Database {
                 host.updated_at,
                 host.protocol,
                 host.protocol_options,
+                host.totp_credential_id,
             ],
         )?;
 
@@ -341,6 +347,11 @@ impl Database {
 
     pub fn delete_host(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
+        // The host's 2FA secret is of no use to anything else.
+        let totp_credential: Option<String> = conn
+            .query_row("SELECT totp_credential_id FROM hosts WHERE id = ?1", params![id], |row| row.get(0))
+            .ok()
+            .flatten();
         let _ = conn.execute("UPDATE hosts SET jump_host_id = NULL WHERE jump_host_id = ?1", params![id]);
         conn.execute("DELETE FROM hosts WHERE id = ?1", params![id])?;
         let now = chrono::Utc::now().to_rfc3339();
@@ -349,6 +360,14 @@ impl Database {
              ON CONFLICT(entity_type, entity_id) DO UPDATE SET deleted_at=excluded.deleted_at",
             params![id, now],
         );
+        if let Some(credential_id) = totp_credential {
+            let _ = conn.execute("DELETE FROM credentials WHERE id = ?1", params![credential_id]);
+            let _ = conn.execute(
+                "INSERT INTO tombstones (entity_type, entity_id, deleted_at) VALUES ('credential', ?1, ?2)
+                 ON CONFLICT(entity_type, entity_id) DO UPDATE SET deleted_at=excluded.deleted_at",
+                params![credential_id, now],
+            );
+        }
         Ok(())
     }
 
@@ -1103,6 +1122,7 @@ impl Database {
                     "credential" => {
                         let conn = self.conn.lock().unwrap();
                         let _ = conn.execute("DELETE FROM credentials WHERE id = ?1", params![&ts.entity_id]);
+                        let _ = conn.execute("UPDATE hosts SET totp_credential_id = NULL WHERE totp_credential_id = ?1", params![&ts.entity_id]);
                     }
                     "snippet" => {
                         if let Ok(Some(local)) = self.get_snippet(&ts.entity_id) {
@@ -1268,6 +1288,10 @@ impl Database {
                 [],
             );
             let _ = conn.execute(
+                "UPDATE hosts SET totp_credential_id = NULL WHERE totp_credential_id IS NOT NULL AND totp_credential_id NOT IN (SELECT id FROM credentials)",
+                [],
+            );
+            let _ = conn.execute(
                 "UPDATE folders SET parent_id = NULL WHERE parent_id IS NOT NULL AND parent_id NOT IN (SELECT id FROM folders)",
                 [],
             );
@@ -1328,4 +1352,63 @@ fn get_database_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("termimus");
     base_dir.join("termimus.db")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn credential(id: &str, kind: &str) -> Credential {
+        Credential {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            ciphertext: vec![1, 2, 3],
+            nonce: vec![4; 12],
+            passphrase_ciphertext: None,
+            passphrase_nonce: None,
+            name: String::new(),
+            key_type: String::new(),
+            public_key: String::new(),
+            fingerprint: String::new(),
+            username: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn host(id: &str, totp_credential_id: Option<&str>) -> Host {
+        Host {
+            id: id.to_string(),
+            folder_id: None,
+            label: id.to_string(),
+            address: "10.0.0.1".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth_method: "password".to_string(),
+            credential_id: None,
+            tags: Vec::new(),
+            last_connected_at: None,
+            os_icon: None,
+            jump_host_id: None,
+            protocol: "ssh".to_string(),
+            protocol_options: None,
+            totp_credential_id: totp_credential_id.map(str::to_string),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn host_totp_secret_round_trips_and_goes_with_the_host() {
+        let db = Database::in_memory().unwrap();
+        db.save_credential(&credential("totp-1", "totp")).unwrap();
+        db.save_host(&host("h1", Some("totp-1"))).unwrap();
+        assert_eq!(db.get_host("h1").unwrap().unwrap().totp_credential_id.as_deref(), Some("totp-1"));
+        assert_eq!(db.list_hosts().unwrap()[0].totp_credential_id.as_deref(), Some("totp-1"));
+        // Anonymous: not a Keychain item.
+        assert!(db.list_keychain_items().unwrap().is_empty());
+
+        db.delete_host("h1").unwrap();
+        assert!(db.get_credential("totp-1").unwrap().is_none(), "the secret is deleted with its host");
+    }
 }

@@ -17,8 +17,18 @@ export interface Host {
   protocol: HostProtocol;
   /** JSON-encoded protocol options, e.g. VncOptions */
   protocol_options?: string | null;
+  /** Set when the host has a saved 2FA (TOTP) secret */
+  totp_credential_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** A current one-time code (see ssh::totp) */
+export interface TotpCode {
+  code: string;
+  /** Seconds until the next code */
+  remaining: number;
+  period: number;
 }
 
 export type HostProtocol = "ssh" | "vnc" | "rdp";
@@ -83,6 +93,8 @@ export interface HostInput {
   jump_host_id?: string | null;
   protocol: HostProtocol;
   protocol_options?: string | null;
+  /** 2FA secret (base32 or otpauth:// URI) to save; "" removes it; omit to keep it */
+  totp_secret?: string;
 }
 
 export interface KeychainItem {
@@ -363,6 +375,10 @@ export const api = {
   deleteHost: (id: string) => invoke<void>("host_delete", { id }),
   getHostPassword: (hostId: string) =>
     invoke<string>("host_get_password", { hostId }),
+  /** Current code for a 2FA secret being entered (rejects an invalid one) */
+  totpPreview: (secret: string) => invoke<TotpCode>("totp_preview", { secret }),
+  /** Current 2FA code of a host with a saved secret */
+  hostTotpCode: (hostId: string) => invoke<TotpCode | null>("host_totp_code", { hostId }),
 
   // Folders
   listFolders: () => invoke<Folder[]>("folder_list"),

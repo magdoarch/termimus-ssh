@@ -21,6 +21,7 @@ import { useKeychainStore } from "../../stores/useKeychainStore";
 import { api, DEFAULT_PORTS, Host, HostInput, HostProtocol, isSshHost, jumpChain, RdpOptions, VncOptions } from "../../lib/api";
 import { DistroBadge, DISTRO_OPTIONS } from "./DistroBadge";
 import { CustomSelect } from "../ui/CustomSelect";
+import { TotpField, totpSecretInput, type TotpChange } from "./TotpField";
 import { copyText } from "../../lib/clipboard";
 
 interface HostModalProps {
@@ -45,6 +46,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
   const [folderId, setFolderId] = useState<string>("");
   const [osIcon, setOsIcon] = useState<string>("");
   const [jumpHostId, setJumpHostId] = useState<string>("");
+  const [totpChange, setTotpChange] = useState<TotpChange>({ kind: "keep" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,6 +74,8 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
 
   useEffect(() => {
     setShowPassword(false);
+    // A duplicate doesn't copy the 2FA secret; type it in for the copy.
+    setTotpChange({ kind: "keep" });
     if (editingHost) {
       // ── EDIT mode ──────────────────────────────────────────────────────────
       setLabel(editingHost.label);
@@ -293,6 +297,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
         os_icon: osIcon || null,
         jump_host_id: jumpHostId || null,
         protocol,
+        totp_secret: protocol === "ssh" ? totpSecretInput(totpChange) : undefined,
         protocol_options: isVnc
           ? JSON.stringify(vncOptions)
           : protocol === "rdp"
@@ -786,6 +791,15 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                     </div>
                   )}
                 </div>
+              )}
+
+              {protocol === "ssh" && (
+                <TotpField
+                  hostId={editingHost?.id}
+                  configured={Boolean(editingHost?.totp_credential_id)}
+                  change={totpChange}
+                  onChange={setTotpChange}
+                />
               )}
             </div>
           </div>
