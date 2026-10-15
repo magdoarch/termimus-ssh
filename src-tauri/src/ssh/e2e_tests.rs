@@ -46,6 +46,7 @@ impl TestServer {
             port: self.port,
             username: self.user.clone(),
             auth: SshAuth::PrivateKey { pem: self.key.clone(), passphrase: None },
+            totp: None,
         }
     }
 

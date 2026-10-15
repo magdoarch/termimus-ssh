@@ -602,6 +602,7 @@ impl NewHost {
             jump_host_id: self.jump_host_id,
             protocol: "ssh".to_string(),
             protocol_options: None,
+            totp_credential_id: None,
             created_at: now.to_string(),
             updated_at: now.to_string(),
         }
@@ -1124,6 +1125,7 @@ Host gone
                 port: host.port,
                 username: host.username.clone(),
                 auth: SshAuth::PrivateKey { pem, passphrase: None },
+                totp: None,
             }
         };
         let pin = db.get_known_host(&bastion.address, bastion.port).unwrap().unwrap();

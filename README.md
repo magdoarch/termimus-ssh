@@ -59,7 +59,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Light & Dark**: Dark, Light or follow-the-system app theme.
 
 ### 🔐 Logins, 2FA & Jump Hosts
-- **Two-Factor Login**: Keyboard-interactive prompts (OTP codes, Duo, PAM questions) appear in a dialog.
+- **Two-Factor Login**: Keyboard-interactive prompts (OTP codes, Duo, PAM questions) appear in a dialog; save a host's TOTP secret and the code is filled in for you.
 - **Asked When Needed**: Hosts without a saved password, and keys without a saved passphrase, ask at login instead of failing.
 - **Jump Host Chains**: Reach hosts through any chain of bastions (ProxyJump, up to 8 hops) — for terminals, SFTP, tunnels and remote desktops.
 - **Shared Connections**: Tabs, SFTP panes and tunnels to the same host share one SSH connection (like OpenSSH's ControlMaster), so a password or 2FA code is asked once.

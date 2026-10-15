@@ -64,6 +64,10 @@ pub struct Host {
     /// Protocol-specific options as JSON, e.g. `{"viewOnly":true}` for VNC.
     #[serde(default)]
     pub protocol_options: Option<String>,
+    /// Credential (kind "totp") holding the host's 2FA secret, used to
+    /// answer one-time-code prompts at login.
+    #[serde(default)]
+    pub totp_credential_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -95,6 +99,10 @@ pub struct HostInput {
     pub protocol: String,
     #[serde(default)]
     pub protocol_options: Option<String>,
+    /// 2FA secret (base32 or otpauth:// URI) to save; "" removes it, absent
+    /// keeps what the host has.
+    #[serde(default)]
+    pub totp_secret: Option<String>,
 }
 
 /// A Keychain entry: a named, reusable credential (SSH private key or

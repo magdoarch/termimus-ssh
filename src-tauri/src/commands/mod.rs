@@ -483,6 +483,43 @@ pub fn host_save(state: State<AppState>, input: HostInput, host_id: Option<Strin
         return Err(format!("Unsupported protocol: {}", input.protocol));
     }
 
+    // 2FA secret: absent keeps it, "" removes it, anything else replaces it.
+    let existing_totp = existing.as_ref().and_then(|h| h.totp_credential_id.clone());
+    let totp_credential_id = match input.totp_secret.as_deref().map(str::trim) {
+        None => existing_totp,
+        Some("") => {
+            if let Some(old) = existing_totp {
+                state.db.delete_credential(&old).map_err(|e| e.to_string())?;
+            }
+            None
+        }
+        Some(secret) => {
+            if !state.vault.is_unlocked() {
+                return Err("Vault must be unlocked to save credentials".to_string());
+            }
+            let totp = crate::ssh::totp::Totp::parse(secret)?;
+            let (ciphertext, nonce) = state.vault.encrypt(totp.to_uri().as_bytes())?;
+            let credential = Credential {
+                id: existing_totp.unwrap_or_else(|| Uuid::new_v4().to_string()),
+                kind: "totp".to_string(),
+                ciphertext,
+                nonce,
+                passphrase_ciphertext: None,
+                passphrase_nonce: None,
+                // Anonymous: it belongs to this host and isn't listed in the Keychain.
+                name: String::new(),
+                key_type: String::new(),
+                public_key: String::new(),
+                fingerprint: String::new(),
+                username: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            };
+            state.db.save_credential(&credential).map_err(|e| e.to_string())?;
+            Some(credential.id)
+        }
+    };
+
     let host = Host {
         id,
         folder_id: input.folder_id,
@@ -498,12 +535,46 @@ pub fn host_save(state: State<AppState>, input: HostInput, host_id: Option<Strin
         jump_host_id,
         protocol: input.protocol,
         protocol_options: input.protocol_options,
+        totp_credential_id,
         created_at,
         updated_at: now,
     };
 
     state.db.save_host(&host).map_err(|e| e.to_string())?;
     Ok(host)
+}
+
+/// The host's 2FA secret, if it has one.
+fn resolve_host_totp(state: &AppState, host: &Host) -> Result<Option<crate::ssh::totp::Totp>, String> {
+    let Some(id) = &host.totp_credential_id else {
+        return Ok(None);
+    };
+    let Some(credential) = state.db.get_credential(id).map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let bytes = state.vault.decrypt(&credential.ciphertext, &credential.nonce)?;
+    let uri = String::from_utf8(bytes).map_err(|e| format!("Invalid 2FA secret: {e}"))?;
+    crate::ssh::totp::Totp::parse(&uri).map(Some)
+}
+
+/// The current code for a 2FA secret being typed in, which also checks it.
+#[tauri::command]
+pub fn totp_preview(secret: String) -> Result<crate::ssh::totp::TotpCode, String> {
+    Ok(crate::ssh::totp::Totp::parse(&secret)?.current())
+}
+
+/// The current 2FA code of a host with a saved secret (like an authenticator app).
+#[tauri::command]
+pub fn host_totp_code(state: State<AppState>, host_id: String) -> Result<Option<crate::ssh::totp::TotpCode>, String> {
+    if !state.vault.is_unlocked() {
+        return Err("Vault must be unlocked to show 2FA codes".to_string());
+    }
+    let host = state
+        .db
+        .get_host(&host_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Host not found".to_string())?;
+    Ok(resolve_host_totp(state.inner(), &host)?.map(|totp| totp.current()))
 }
 
 #[tauri::command]
@@ -673,6 +744,7 @@ fn hops_for(state: &AppState, hosts: &[Host]) -> Result<Route, String> {
                 port: host.port,
                 username: host.username.clone(),
                 auth: resolve_host_auth(state, host)?,
+                totp: resolve_host_totp(state, host)?,
             })
         })
         .collect()

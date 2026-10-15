@@ -40,6 +40,8 @@ pub struct Hop {
     pub port: u16,
     pub username: String,
     pub auth: SshAuth,
+    /// The host's 2FA secret: one-time-code prompts are answered with it.
+    pub totp: Option<super::totp::Totp>,
 }
 
 impl Hop {
@@ -463,7 +465,7 @@ async fn open(
 
     progress(3, "authenticating", &format!("Authenticating to {name}..."));
     let prompt_target = if is_jump { format!("{} (jump host)", hop.target()) } else { hop.target() };
-    match authenticate(&mut handle, &hop.username, &hop.auth, &prompt_target).await {
+    match authenticate(&mut handle, &hop.username, &hop.auth, hop.totp.as_ref(), &prompt_target).await {
         Ok(true) => {}
         Ok(false) => return Err(context("Authentication rejected by server".to_string())),
         Err(e) => return Err(context(e)),
