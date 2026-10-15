@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { ClipboardPaste, History, Network, RefreshCw, type LucideIcon } from "lucide-react";
+import { Circle, ClipboardPaste, Film, History, Network, RefreshCw, type LucideIcon } from "lucide-react";
+import { useRecordingStore } from "../../stores/useRecordingStore";
 import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 
@@ -45,6 +46,8 @@ export function SessionsTab() {
       setAutoReconnect: s.setAutoReconnect,
       restoreTabs: s.restoreTabs,
       setRestoreTabs: s.setRestoreTabs,
+      recordSessions: s.recordSessions,
+      setRecordSessions: s.setRecordSessions,
     }))
   );
 
@@ -104,6 +107,22 @@ export function SessionsTab() {
             Shows what you are about to paste when it has line breaks and the shell would run each line right
             away. Programs that handle pastes themselves (bracketed paste: modern bash and zsh prompts, vim,
             nano) aren't interrupted.
+          </ToggleRow>
+          <ToggleRow
+            icon={Circle}
+            title="Record every SSH session"
+            checked={settings.recordSessions}
+            onChange={settings.setRecordSessions}
+          >
+            Saves what each SSH terminal shows (never what you type) as an asciinema recording you can play back
+            or export. Single sessions can also be recorded from the terminal's right-click menu.
+            <button
+              type="button"
+              onClick={() => useRecordingStore.getState().open()}
+              className="mt-1.5 flex items-center gap-1.5 font-medium text-[var(--primary)] hover:underline"
+            >
+              <Film size={12} /> Open recordings
+            </button>
           </ToggleRow>
         </div>
       </div>

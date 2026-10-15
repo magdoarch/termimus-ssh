@@ -25,6 +25,7 @@ import { PasteConfirmModal } from "./components/terminal/PasteConfirmModal";
 import { SnippetVariablesModal } from "./components/snippets/SnippetVariablesModal";
 import { InstallKeyModal } from "./components/keychain/InstallKeyModal";
 import { HostPanel } from "./components/hostpanel/HostPanel";
+import { RecordingsModal } from "./components/recordings/RecordingsModal";
 import { useAuthPromptStore } from "./stores/useAuthPromptStore";
 import { SnippetModal } from "./components/snippets/SnippetModal";
 import { SettingsView } from "./components/settings/SettingsView";
@@ -299,6 +300,7 @@ function App() {
       <SnippetVariablesModal />
       <InstallKeyModal />
       <HostPanel />
+      <RecordingsModal />
     </div>
   );
 }

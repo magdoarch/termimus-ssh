@@ -3,6 +3,7 @@ pub mod commands;
 pub mod db;
 pub mod hostinfo;
 pub mod pty;
+pub mod recording;
 pub mod remote;
 pub mod sftp;
 pub mod ssh;
@@ -143,6 +144,13 @@ pub fn run() {
             commands::docker_stats,
             commands::docker_action,
             commands::docker_logs,
+            commands::ssh_recording_start,
+            commands::ssh_recording_stop,
+            commands::ssh_recording_status,
+            commands::recording_list,
+            commands::recording_read,
+            commands::recording_delete,
+            commands::recording_export,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")
