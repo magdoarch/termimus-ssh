@@ -110,13 +110,16 @@ export function RemoteDesktopView({ sessionId, hostId, visible, isFocused = true
             >
               <span className="font-mono">Ctrl+Alt+Del</span>
             </button>
-            {/* RDP clipboard redirection (CLIPRDR) isn't implemented yet */}
-            {protocol === "vnc" && (
-              <button className={toolbarButton} title="Paste local clipboard to the remote clipboard" onClick={sendClipboard}>
-                <ClipboardPaste size={13} />
-                <span>Clipboard</span>
-              </button>
-            )}
+            {/* Text copied remotely lands in the local clipboard automatically;
+                this sends the local clipboard the other way. */}
+            <button
+              className={toolbarButton}
+              title="Send the local clipboard text to the remote machine (then paste there)"
+              onClick={sendClipboard}
+            >
+              <ClipboardPaste size={13} />
+              <span>Clipboard</span>
+            </button>
             <button
               className={toolbarButton}
               title={scaleMode === "fit" ? "Show at actual size (1:1)" : "Fit to pane"}

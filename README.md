@@ -59,7 +59,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Light & Dark**: Dark, Light or follow-the-system app theme.
 
 ### 🖼️ Remote Desktop
-- **VNC Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host.
+- **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.
 
 ### 🗂️ Workspaces & Multi-Server Cluster Launcher
 - **Multi-Server Layout Presets**: Design and save complex multi-terminal split layouts (Single, Vertical 2-way, Horizontal 2-way, 3-way, 4-way Grid, 6-way Matrix) with assigned hosts for each pane.
