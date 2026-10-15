@@ -2,6 +2,7 @@ pub mod biometric;
 pub mod commands;
 pub mod db;
 pub mod pty;
+pub mod remote;
 pub mod sftp;
 pub mod ssh;
 pub mod sshkey;
@@ -11,6 +12,7 @@ pub mod vault;
 use commands::AppState;
 use db::Database;
 use pty::PtyManager;
+use remote::RemoteDesktopManager;
 use sftp::SftpManager;
 use ssh::SessionManager;
 use std::sync::Arc;
@@ -26,8 +28,9 @@ pub fn run() {
     let sftp = Arc::new(SftpManager::new());
     let tunnel = Arc::new(TunnelManager::new());
     let pty = Arc::new(PtyManager::new());
+    let remote = Arc::new(RemoteDesktopManager::new());
 
-    let state = AppState { db, vault, ssh, sftp, tunnel, pty };
+    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -112,6 +115,9 @@ pub fn run() {
             commands::sync_get_devices,
             commands::sync_secrets_save,
             commands::sync_secrets_load,
+            commands::remote_connect,
+            commands::remote_input,
+            commands::remote_disconnect,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")
@@ -121,7 +127,9 @@ pub fn run() {
             // so quitting never hangs on dead sockets.
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let ssh = app_handle.state::<AppState>().ssh.clone();
+                let remote = app_handle.state::<AppState>().remote.clone();
                 tauri::async_runtime::block_on(async move {
+                    remote.disconnect_all().await;
                     let _ = tokio::time::timeout(
                         std::time::Duration::from_secs(2),
                         ssh.disconnect_all(),

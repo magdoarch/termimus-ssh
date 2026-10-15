@@ -1,6 +1,7 @@
 use crate::db::models::{Folder, Host, HostInput, Credential, KeychainItem, KeychainKeyInput, KeychainIdentityInput, PortForwardRule, PortForwardInput, Snippet, SnippetInput, KnownHost, BackupBundle, EncryptedBackupEnvelope, ImportSummary, WorkspacePreset, WorkspacePresetInput};
 use crate::db::Database;
 use crate::pty::PtyManager;
+use crate::remote::{RemoteDesktopManager, RemoteInput, VncOptions, VncTarget};
 use crate::sftp::{self, FileEntry, SftpManager};
 use crate::ssh::{SessionManager, SshAuth};
 use crate::tunnel::TunnelManager;
@@ -22,6 +23,7 @@ pub struct AppState {
     pub sftp: Arc<SftpManager>,
     pub tunnel: Arc<TunnelManager>,
     pub pty: Arc<PtyManager>,
+    pub remote: Arc<RemoteDesktopManager>,
 }
 
 /// Minimum master password length for new or changed vault passwords.
@@ -475,6 +477,9 @@ pub fn host_save(state: State<AppState>, input: HostInput, host_id: Option<Strin
         existing.as_ref().and_then(|h| h.os_icon.clone())
     };
     let jump_host_id = input.jump_host_id;
+    if !matches!(input.protocol.as_str(), "ssh" | "vnc") {
+        return Err(format!("Unsupported protocol: {}", input.protocol));
+    }
 
     let host = Host {
         id,
@@ -489,6 +494,8 @@ pub fn host_save(state: State<AppState>, input: HostInput, host_id: Option<Strin
         last_connected_at,
         os_icon,
         jump_host_id,
+        protocol: input.protocol,
+        protocol_options: input.protocol_options,
         created_at,
         updated_at: now,
     };
@@ -539,6 +546,15 @@ pub fn folder_delete(state: State<AppState>, id: String) -> Result<(), String> {
 }
 
 fn resolve_host_auth(state: &AppState, host: &Host) -> Result<SshAuth, String> {
+    // Every SSH-family path (terminal, SFTP, tunnel, jump hop) resolves auth
+    // here, so this is where a VNC host is kept out of them.
+    if host.protocol != "ssh" {
+        return Err(format!(
+            "'{}' is a {} host, not an SSH host",
+            host.label,
+            host.protocol.to_uppercase()
+        ));
+    }
     match host.auth_method.as_str() {
         "password" => {
             let secret = if let Some(cred_id) = &host.credential_id {
@@ -606,6 +622,9 @@ fn resolve_jump_host(state: &AppState, host: &Host) -> Result<Option<crate::ssh:
         .get_host(jid)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Jump Host / Bastion server not found".to_string())?;
+    if jump.protocol != "ssh" {
+        return Err(format!("Jump Host '{}' must be an SSH host", jump.label));
+    }
     let jump_auth = resolve_host_auth(state, &jump)?;
     Ok(Some(crate::ssh::JumpHostConfig {
         address: jump.address,
@@ -1912,4 +1931,87 @@ pub async fn sync_get_devices(
 
     let body: DevicesResponse = res.json().await.unwrap_or(DevicesResponse { devices: Vec::new() });
     Ok(body.devices)
+}
+
+// ================= REMOTE DESKTOP (VNC) COMMANDS =================
+
+/// Decrypt the VNC password for a host. `auth_method == "none"` means the
+/// server is configured without authentication.
+fn resolve_remote_password(state: &AppState, host: &Host) -> Result<Option<zeroize::Zeroizing<String>>, String> {
+    if host.auth_method == "none" {
+        return Ok(None);
+    }
+    let Some(cred_id) = &host.credential_id else {
+        return Ok(None);
+    };
+    let cred = state
+        .db
+        .get_credential(cred_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Credential record not found".to_string())?;
+    let bytes = zeroize::Zeroizing::new(state.vault.decrypt(&cred.ciphertext, &cred.nonce)?);
+    let password = String::from_utf8(bytes.to_vec()).map_err(|e| format!("Invalid utf-8 password: {e}"))?;
+    Ok(Some(zeroize::Zeroizing::new(password)))
+}
+
+/// Connect a VNC host. Frames stream to `on_frame` (binary, see
+/// `remote/frame.rs`); progress, clipboard and close notifications are
+/// emitted as `remote-progress-{id}`, `remote-clipboard-{id}` and
+/// `remote-closed-{id}`.
+#[tauri::command]
+pub async fn remote_connect(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host_id: String,
+    session_id: String,
+    on_frame: tauri::ipc::Channel<tauri::ipc::InvokeResponseBody>,
+) -> Result<(), String> {
+    let host = state
+        .db
+        .get_host(&host_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Host not found".to_string())?;
+    if host.protocol != "vnc" {
+        return Err(format!("'{}' is not a VNC host", host.label));
+    }
+
+    let password = resolve_remote_password(&state, &host)?;
+    let jump = resolve_jump_host(&state, &host)?;
+    let options: VncOptions = host
+        .protocol_options
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|e| format!("Invalid VNC options for this host: {e}"))?
+        .unwrap_or_default();
+
+    let target = VncTarget {
+        address: host.address,
+        port: host.port,
+        password,
+        jump,
+        options,
+    };
+    state
+        .remote
+        .connect_vnc(app, state.db.clone(), session_id, target, on_frame)
+        .await?;
+
+    let _ = state.db.touch_host_last_connected(&host_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn remote_input(
+    state: State<'_, AppState>,
+    session_id: String,
+    events: Vec<RemoteInput>,
+) -> Result<(), String> {
+    state.remote.send_input(&session_id, events).await
+}
+
+#[tauri::command]
+pub async fn remote_disconnect(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    state.remote.disconnect(&session_id).await;
+    Ok(())
 }
