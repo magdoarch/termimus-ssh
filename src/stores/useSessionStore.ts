@@ -18,6 +18,7 @@ import {
   updateSplitRatio,
 } from "../lib/layoutTree";
 import { disposeTerminalSession } from "../components/terminal/XtermView";
+import { getPaneCountForLayout, PresetLayoutType } from "./useWorkspaceStore";
 
 const textEncoder = new TextEncoder();
 
@@ -434,10 +435,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     return sessionId;
   },
 
-  openClusterGroup: (nodes, layout, broadcast = false, label) => {
+  openClusterGroup: (nodes, requestedLayout, broadcast = false, label) => {
     if (nodes.length === 0) return [];
 
-    const sessionEntries = nodes.map((n, idx) => {
+    // Place hosts by their configured pane slot, and never put one session in
+    // two leaves: with fewer hosts than slots (e.g. a host was deleted), fall
+    // back to a layout that has exactly as many panes.
+    const slots = getPaneCountForLayout(requestedLayout);
+    const placed = [...nodes].sort((a, b) => a.paneIndex - b.paneIndex).slice(0, slots);
+    let layout: PresetLayoutType = requestedLayout;
+    if (placed.length < slots) {
+      if (placed.length === 3) layout = "split-2-1";
+      else if (placed.length === 2) layout = requestedLayout === "split-horizontal" ? "split-horizontal" : "split-vertical";
+    }
+
+    const sessionEntries = placed.map((n, idx) => {
       const sessionId = `session-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
       const tab: SshTab = {
         id: sessionId,
@@ -455,44 +467,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     // Build the layout tree atomically in one go
     let rootPane: PaneNode;
+    // `layout` now has exactly sessionIds.length panes (or 1 for a single host)
+    const [s0, s1, s2, s3] = sessionIds;
     if (sessionIds.length <= 1) {
-      rootPane = createLeafPane(sessionIds[0]);
+      rootPane = createLeafPane(s0);
     } else if (layout === "split-vertical") {
-      rootPane = createSplitPane(
-        "row",
-        createLeafPane(sessionIds[0]),
-        createLeafPane(sessionIds[1] || sessionIds[0])
-      );
+      rootPane = createSplitPane("row", createLeafPane(s0), createLeafPane(s1));
     } else if (layout === "split-horizontal") {
-      rootPane = createSplitPane(
-        "column",
-        createLeafPane(sessionIds[0]),
-        createLeafPane(sessionIds[1] || sessionIds[0])
-      );
+      rootPane = createSplitPane("column", createLeafPane(s0), createLeafPane(s1));
     } else if (layout === "grid-4") {
-      const s0 = sessionIds[0];
-      const s1 = sessionIds[1] || s0;
-      const s2 = sessionIds[2] || s0;
-      const s3 = sessionIds[3] || s1;
       const top = createSplitPane("row", createLeafPane(s0), createLeafPane(s1));
       const bottom = createSplitPane("row", createLeafPane(s2), createLeafPane(s3));
       rootPane = createSplitPane("column", top, bottom);
     } else if (layout === "split-1-2") {
-      const s0 = sessionIds[0];
-      const s1 = sessionIds[1] || s0;
-      const s2 = sessionIds[2] || s0;
       const right = createSplitPane("column", createLeafPane(s1), createLeafPane(s2));
       rootPane = createSplitPane("row", createLeafPane(s0), right);
     } else if (layout === "split-2-1") {
-      const s0 = sessionIds[0];
-      const s1 = sessionIds[1] || s0;
-      const s2 = sessionIds[2] || s0;
       const top = createSplitPane("row", createLeafPane(s0), createLeafPane(s1));
       rootPane = createSplitPane("column", top, createLeafPane(s2));
     } else if (layout === "triple-column") {
-      const s0 = sessionIds[0];
-      const s1 = sessionIds[1] || s0;
-      const s2 = sessionIds[2] || s0;
       const rightTwo = createSplitPane("row", createLeafPane(s1), createLeafPane(s2), 50);
       rootPane = createSplitPane("row", createLeafPane(s0), rightTwo, 33.3);
     } else {
@@ -522,25 +515,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   closeSession: async (sessionId: string) => {
-    // 1. Clean up xterm instance & Tauri event listeners
-    try {
-      disposeTerminalSession(sessionId);
-    } catch (e) {
-      console.warn("Failed to dispose xterm instance:", e);
-    }
-
-    // 2. Disconnect SSH / Local backend
     const tabToClose = get().tabs.find((t) => t.id === sessionId);
-    try {
-      if (tabToClose?.isLocal) {
-        await api.killLocalPty(sessionId);
-      } else {
-        await api.disconnectSsh(sessionId);
-      }
-    } catch (e) {
-      console.warn("Failed to disconnect cleanly:", e);
-    }
 
+    // 1. Remove the tab from the layout first. Disposing while its pane is
+    //    still mounted would let a remount (during a slow disconnect) build a
+    //    fresh terminal and reconnect SSH for a tab that is being closed.
     set((state) => {
       const remainingTabs = state.tabs.filter((t) => t.id !== sessionId);
 
@@ -608,6 +587,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         broadcastGroupIds: validBroadcastGroupIds,
       };
     });
+
+    // 2. Clean up xterm instance & Tauri event listeners
+    try {
+      disposeTerminalSession(sessionId);
+    } catch (e) {
+      console.warn("Failed to dispose xterm instance:", e);
+    }
+
+    // 3. Disconnect SSH / Local backend
+    try {
+      if (tabToClose?.isLocal || sessionId.startsWith("local-")) {
+        await api.killLocalPty(sessionId);
+      } else {
+        await api.disconnectSsh(sessionId);
+      }
+    } catch (e) {
+      console.warn("Failed to disconnect cleanly:", e);
+    }
   },
 
   closeGroup: async (groupId: string) => {

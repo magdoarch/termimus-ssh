@@ -32,7 +32,16 @@ export function WorkspaceView({ onOpenTerminal }: WorkspaceViewProps) {
     openEditModal,
     duplicatePreset,
     deletePreset,
-  } = useWorkspaceStore();
+  } = useWorkspaceStore(
+    useShallow((s) => ({
+      presets: s.presets,
+      refresh: s.refresh,
+      openCreateModal: s.openCreateModal,
+      openEditModal: s.openEditModal,
+      duplicatePreset: s.duplicatePreset,
+      deletePreset: s.deletePreset,
+    }))
+  );
 
   useEffect(() => {
     refresh();
@@ -41,7 +50,7 @@ export function WorkspaceView({ onOpenTerminal }: WorkspaceViewProps) {
   const { groups, activeGroupId, tabs } = useSessionStore(
     useShallow((s) => ({ groups: s.groups, activeGroupId: s.activeGroupId, tabs: s.tabs }))
   );
-  const { hosts } = useHostStore();
+  const hosts = useHostStore((s) => s.hosts);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [contextMenu, setContextMenu] = useState<{

@@ -13,11 +13,13 @@ import {
   Check,
   RefreshCw,
 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { useTunnelStore } from "../../stores/useTunnelStore";
 import { useHostStore } from "../../stores/useHostStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { TunnelModal } from "./TunnelModal";
 import { PortForwardRule, Host } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 
 export function TunnelView() {
   const {
@@ -31,9 +33,22 @@ export function TunnelView() {
     openCreateModal,
     openEditModal,
     deleteRule,
-  } = useTunnelStore();
+  } = useTunnelStore(
+    useShallow((s) => ({
+      rules: s.rules,
+      activeRuleIds: s.activeRuleIds,
+      isLoading: s.isLoading,
+      error: s.error,
+      startingRuleId: s.startingRuleId,
+      refresh: s.refresh,
+      toggleTunnel: s.toggleTunnel,
+      openCreateModal: s.openCreateModal,
+      openEditModal: s.openEditModal,
+      deleteRule: s.deleteRule,
+    }))
+  );
 
-  const { hosts } = useHostStore();
+  const hosts = useHostStore((s) => s.hosts);
 
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -216,7 +231,7 @@ export function TunnelView() {
               {/* Copy Local Address */}
               <button
                 onClick={async () => {
-                  await navigator.clipboard.writeText(
+                  await copyText(
                     `${contextMenu.rule!.local_address}:${contextMenu.rule!.local_port}`
                   );
                   showCopyToast("Copied local address");
@@ -231,7 +246,7 @@ export function TunnelView() {
               {/* Copy Remote Address */}
               <button
                 onClick={async () => {
-                  await navigator.clipboard.writeText(
+                  await copyText(
                     `${contextMenu.rule!.remote_address}:${contextMenu.rule!.remote_port}`
                   );
                   showCopyToast("Copied remote address");

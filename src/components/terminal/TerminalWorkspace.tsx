@@ -23,7 +23,6 @@ export function TerminalWorkspace({ visible, onOpenWorkspaces }: TerminalWorkspa
     toggleMaximizePane,
     isDraggingTab,
     draggedTabId,
-    pointerPos,
     updateDragPos,
     endDragTab,
     broadcastGroupIds,
@@ -37,7 +36,6 @@ export function TerminalWorkspace({ visible, onOpenWorkspaces }: TerminalWorkspa
       toggleMaximizePane: s.toggleMaximizePane,
       isDraggingTab: s.isDraggingTab,
       draggedTabId: s.draggedTabId,
-      pointerPos: s.pointerPos,
       updateDragPos: s.updateDragPos,
       endDragTab: s.endDragTab,
       broadcastGroupIds: s.broadcastGroupIds,
@@ -248,19 +246,28 @@ export function TerminalWorkspace({ visible, onOpenWorkspaces }: TerminalWorkspa
       {isSidebarOpen && <SnippetSidebar />}
 
       {/* Floating Drag Badge that follows the cursor during tab drag */}
-      {isDraggingTab && draggedTab && (
-        <div
-          className="fixed pointer-events-none z-50 flex items-center gap-2 rounded-lg bg-[var(--surface-high)] px-3 py-1.5 text-xs font-mono font-medium text-[var(--primary)] shadow-2xl border border-[var(--primary)] ring-2 ring-[var(--primary)]/20 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
-          style={{
-            left: `${pointerPos.x + 12}px`,
-            top: `${pointerPos.y + 12}px`,
-          }}
-        >
-          <TerminalIcon size={13} className="text-[var(--primary)]" />
-          <span className="truncate max-w-[140px]">{draggedTab.hostLabel}</span>
-          <span className="text-[10px] text-[var(--text-muted)]">(Drag to split)</span>
-        </div>
-      )}
+      {isDraggingTab && draggedTab && <DragBadge label={draggedTab.hostLabel} />}
+    </div>
+  );
+}
+
+/**
+ * Follows the cursor during a tab drag. Kept separate so only this badge
+ * re-renders on every pointermove, not the whole workspace tree.
+ */
+function DragBadge({ label }: { label: string }) {
+  const pointerPos = useSessionStore((s) => s.pointerPos);
+  return (
+    <div
+      className="fixed pointer-events-none z-50 flex items-center gap-2 rounded-lg bg-[var(--surface-high)] px-3 py-1.5 text-xs font-mono font-medium text-[var(--primary)] shadow-2xl border border-[var(--primary)] ring-2 ring-[var(--primary)]/20 backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+      style={{
+        left: `${pointerPos.x + 12}px`,
+        top: `${pointerPos.y + 12}px`,
+      }}
+    >
+      <TerminalIcon size={13} className="text-[var(--primary)]" />
+      <span className="truncate max-w-[140px]">{label}</span>
+      <span className="text-[10px] text-[var(--text-muted)]">(Drag to split)</span>
     </div>
   );
 }

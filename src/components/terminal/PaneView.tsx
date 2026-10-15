@@ -84,7 +84,7 @@ export function PaneView({ pane, visible = true }: PaneViewProps) {
       : "rgba(0, 0, 0, 0.28)";
 
   const headerBorder = isFocused
-    ? "rgba(0, 210, 180, 0.35)"
+    ? "color-mix(in srgb, var(--primary) 35%, transparent)"
     : isLight
       ? "rgba(0, 0, 0, 0.12)"
       : "rgba(255, 255, 255, 0.08)";

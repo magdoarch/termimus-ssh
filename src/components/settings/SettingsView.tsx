@@ -24,6 +24,7 @@ import {
   ExternalLink,
   ArrowUpCircle,
 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { BackupRestoreSection } from "../vault/BackupRestoreSection";
 import { SyncSection } from "../sync/SyncSection";
 import { TerminalThemeTab } from "./TerminalThemeTab";
@@ -45,8 +46,8 @@ type SettingsTab = "security" | "terminal" | "sync" | "known_hosts" | "backup" |
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("security");
-  const { knownHosts } = useKnownHostsStore();
-  const { hasUpdate } = useUpdateStore();
+  const knownHosts = useKnownHostsStore((s) => s.knownHosts);
+  const hasUpdate = useUpdateStore((s) => s.hasUpdate);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const tabs: {
@@ -162,8 +163,26 @@ export function SettingsView() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function SecurityVaultTab() {
-  const { isUnlocked, isInitialized, lock: lockVault, refresh: refreshVault, isBiometricSupported, openUnlockPrompt } = useVaultStore();
-  const { useOsKeyring, setUseOsKeyring, useBiometrics, setUseBiometrics, autoLockPolicy, setAutoLockPolicy } = useSettingsStore();
+  const { isUnlocked, isInitialized, lock: lockVault, refresh: refreshVault, isBiometricSupported, openUnlockPrompt } = useVaultStore(
+    useShallow((s) => ({
+      isUnlocked: s.isUnlocked,
+      isInitialized: s.isInitialized,
+      lock: s.lock,
+      refresh: s.refresh,
+      isBiometricSupported: s.isBiometricSupported,
+      openUnlockPrompt: s.openUnlockPrompt,
+    }))
+  );
+  const { useOsKeyring, setUseOsKeyring, useBiometrics, setUseBiometrics, autoLockPolicy, setAutoLockPolicy } = useSettingsStore(
+    useShallow((s) => ({
+      useOsKeyring: s.useOsKeyring,
+      setUseOsKeyring: s.setUseOsKeyring,
+      useBiometrics: s.useBiometrics,
+      setUseBiometrics: s.setUseBiometrics,
+      autoLockPolicy: s.autoLockPolicy,
+      setAutoLockPolicy: s.setAutoLockPolicy,
+    }))
+  );
 
   const [keyringLoading, setKeyringLoading] = useState(false);
   const [keyringError, setKeyringError] = useState<string | null>(null);
@@ -446,7 +465,14 @@ function SecurityVaultTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function KnownHostsTab() {
-  const { knownHosts, isLoading, refresh, resetKnownHost } = useKnownHostsStore();
+  const { knownHosts, isLoading, refresh, resetKnownHost } = useKnownHostsStore(
+    useShallow((s) => ({
+      knownHosts: s.knownHosts,
+      isLoading: s.isLoading,
+      refresh: s.refresh,
+      resetKnownHost: s.resetKnownHost,
+    }))
+  );
 
   useEffect(() => {
     if (knownHosts.length === 0) {
@@ -562,8 +588,16 @@ function KnownHostsTab() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function AboutTab() {
-  const { currentVersion, latestVersion, hasUpdate, releaseUrl, isChecking, checkForUpdates } =
-    useUpdateStore();
+  const { currentVersion, latestVersion, hasUpdate, releaseUrl, isChecking, checkForUpdates } = useUpdateStore(
+    useShallow((s) => ({
+      currentVersion: s.currentVersion,
+      latestVersion: s.latestVersion,
+      hasUpdate: s.hasUpdate,
+      releaseUrl: s.releaseUrl,
+      isChecking: s.isChecking,
+      checkForUpdates: s.checkForUpdates,
+    }))
+  );
 
   return (
     <div className="space-y-5">
@@ -690,13 +724,13 @@ function AboutTab() {
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-low)] p-5 shadow-sm space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start sm:items-center gap-3.5">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FF5E5B]/15 shrink-0 border border-[#FF5E5B]/20">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--brand-kofi)]/15 shrink-0 border border-[var(--brand-kofi)]/20">
               <img src={kofiIcon} alt="Ko-fi" className="w-6 h-auto object-contain drop-shadow-xs" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h4 className="text-sm font-semibold text-[var(--text-primary)]">Support Termimus</h4>
-                <span className="rounded bg-[#FF5E5B]/15 px-2 py-0.5 text-[10px] font-semibold text-[#FF5E5B] border border-[#FF5E5B]/30">
+                <span className="rounded bg-[var(--brand-kofi)]/15 px-2 py-0.5 text-[10px] font-semibold text-[var(--brand-kofi)] border border-[var(--brand-kofi)]/30">
                   Ko-fi
                 </span>
               </div>
@@ -709,7 +743,7 @@ function AboutTab() {
           <button
             type="button"
             onClick={() => openExternalUrl("https://ko-fi.com/termimus")}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[#FF5E5B] hover:bg-[#ff4743] text-white transition-all shadow-sm shrink-0 cursor-pointer hover:shadow-md active:scale-95"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--brand-kofi)] hover:bg-[var(--brand-kofi-hover)] text-white transition-all shadow-sm shrink-0 cursor-pointer hover:shadow-md active:scale-95"
           >
             <img src={kofiIcon} alt="" className="w-4 h-auto brightness-0 invert" />
             <span>Donate on Ko-fi</span>

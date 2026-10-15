@@ -17,6 +17,7 @@ import { Host } from "../../lib/api";
 import { useHostStore } from "../../stores/useHostStore";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useShallow } from "zustand/react/shallow";
+import { copyText } from "../../lib/clipboard";
 
 export interface ConnectionLog {
   timestamp: string;
@@ -45,7 +46,7 @@ export function ConnectionProgress({
 }: ConnectionProgressProps) {
   const [showLogs, setShowLogs] = useState(false);
   const [copied, setCopied] = useState(false);
-  const { openEditModal } = useHostStore();
+  const openEditModal = useHostStore((s) => s.openEditModal);
   const { closeSession, activeTabId } = useSessionStore(
     useShallow((s) => ({ closeSession: s.closeSession, activeTabId: s.activeTabId }))
   );
@@ -71,7 +72,7 @@ export function ConnectionProgress({
       )
       .join("\n");
     try {
-      await navigator.clipboard.writeText(text || error || "No logs available");
+      await copyText(text || error || "No logs available");
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

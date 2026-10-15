@@ -41,6 +41,10 @@
     --text-secondary: #8b949e;
     --text-muted: #6e7681;
 
+    /* Third-party brand colors */
+    --brand-kofi: #ff5e5b;
+    --brand-kofi-hover: #ff4743;
+
     /* Backward-compat aliases for older components */
     --background: var(--canvas);
     --sidebar: var(--surface-low);

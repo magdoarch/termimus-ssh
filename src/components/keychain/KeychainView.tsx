@@ -10,11 +10,13 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { useKeychainStore } from "../../stores/useKeychainStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { KeychainItem } from "../../lib/api";
 import { KeyModal } from "./KeyModal";
 import { IdentityModal } from "./IdentityModal";
+import { copyText } from "../../lib/clipboard";
 
 export function KeychainView() {
   const {
@@ -27,7 +29,19 @@ export function KeychainView() {
     openCreateIdentityModal,
     openEditIdentityModal,
     deleteItem,
-  } = useKeychainStore();
+  } = useKeychainStore(
+    useShallow((s) => ({
+      items: s.items,
+      isLoading: s.isLoading,
+      searchQuery: s.searchQuery,
+      setSearchQuery: s.setSearchQuery,
+      openCreateKeyModal: s.openCreateKeyModal,
+      openEditKeyModal: s.openEditKeyModal,
+      openCreateIdentityModal: s.openCreateIdentityModal,
+      openEditIdentityModal: s.openEditIdentityModal,
+      deleteItem: s.deleteItem,
+    }))
+  );
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -97,7 +111,7 @@ export function KeychainView() {
   const handleCopyPublicKey = useCallback(async (item: KeychainItem) => {
     if (!item.public_key) return;
     try {
-      await navigator.clipboard.writeText(item.public_key);
+      await copyText(item.public_key);
       setCopiedId(item.id);
       setTimeout(() => setCopiedId((prev) => (prev === item.id ? null : prev)), 2000);
     } catch (err) {
@@ -261,7 +275,7 @@ export function KeychainView() {
               {contextMenu.item.public_key && (
                 <button
                   onClick={async () => {
-                    await navigator.clipboard.writeText(contextMenu.item!.public_key);
+                    await copyText(contextMenu.item!.public_key);
                     showCopyToast("Copied public key");
                     setContextMenu(null);
                   }}
@@ -275,7 +289,7 @@ export function KeychainView() {
               {contextMenu.item.fingerprint && (
                 <button
                   onClick={async () => {
-                    await navigator.clipboard.writeText(contextMenu.item!.fingerprint);
+                    await copyText(contextMenu.item!.fingerprint);
                     showCopyToast("Copied fingerprint");
                     setContextMenu(null);
                   }}
@@ -289,7 +303,7 @@ export function KeychainView() {
               {contextMenu.item.username && (
                 <button
                   onClick={async () => {
-                    await navigator.clipboard.writeText(contextMenu.item!.username!);
+                    await copyText(contextMenu.item!.username!);
                     showCopyToast("Copied username");
                     setContextMenu(null);
                   }}

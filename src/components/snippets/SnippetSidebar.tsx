@@ -26,6 +26,7 @@ import { useSessionStore } from "../../stores/useSessionStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { getAllLeafPanes } from "../../lib/layoutTree";
 import { Snippet } from "../../lib/api";
+import { copyText } from "../../lib/clipboard";
 
 export function SnippetSidebar() {
   const {
@@ -36,7 +37,17 @@ export function SnippetSidebar() {
     openCreateModal,
     openEditModal,
     toggleSidebar,
-  } = useSnippetStore();
+  } = useSnippetStore(
+    useShallow((s) => ({
+      snippets: s.snippets,
+      isLoading: s.isLoading,
+      refresh: s.refresh,
+      deleteSnippet: s.deleteSnippet,
+      openCreateModal: s.openCreateModal,
+      openEditModal: s.openEditModal,
+      toggleSidebar: s.toggleSidebar,
+    }))
+  );
 
   const {
     tabs,
@@ -168,7 +179,7 @@ export function SnippetSidebar() {
 
   const handleCopy = useCallback(async (id: string, text: string) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       setCopiedId(id);
       setTimeout(() => setCopiedId((prev) => (prev === id ? null : prev)), 1800);
     } catch {

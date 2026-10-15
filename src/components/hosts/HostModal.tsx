@@ -16,6 +16,7 @@ import { useKeychainStore } from "../../stores/useKeychainStore";
 import { api, HostInput } from "../../lib/api";
 import { DistroBadge, DISTRO_OPTIONS } from "./DistroBadge";
 import { CustomSelect } from "../ui/CustomSelect";
+import { copyText } from "../../lib/clipboard";
 
 interface HostModalProps {
   onOpenKeychain?: () => void;
@@ -194,7 +195,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
   async function handleCopyPublicKey(keyText?: string | null) {
     if (!keyText) return;
     try {
-      await navigator.clipboard.writeText(keyText);
+      await copyText(keyText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {

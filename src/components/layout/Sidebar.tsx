@@ -10,6 +10,7 @@ import {
   Lock,
   ArrowUpCircle,
 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import { useVaultStore } from "../../stores/useVaultStore";
 import { useHostStore } from "../../stores/useHostStore";
 import { useSnippetStore } from "../../stores/useSnippetStore";
@@ -28,13 +29,25 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeNav, onNavChange }: SidebarProps) {
-  const { isUnlocked, lock: lockVault } = useVaultStore();
-  const { hosts } = useHostStore();
-  const { snippets } = useSnippetStore();
-  const { activeRuleIds } = useTunnelStore();
-  const { items: keychainItems } = useKeychainStore();
-  const { presets } = useWorkspaceStore();
-  const { currentVersion, latestVersion, hasUpdate, releaseUrl } = useUpdateStore();
+  const { isUnlocked, lock: lockVault } = useVaultStore(
+    useShallow((s) => ({
+      isUnlocked: s.isUnlocked,
+      lock: s.lock,
+    }))
+  );
+  const hosts = useHostStore((s) => s.hosts);
+  const snippets = useSnippetStore((s) => s.snippets);
+  const activeRuleIds = useTunnelStore((s) => s.activeRuleIds);
+  const keychainItems = useKeychainStore((s) => s.items);
+  const presets = useWorkspaceStore((s) => s.presets);
+  const { currentVersion, latestVersion, hasUpdate, releaseUrl } = useUpdateStore(
+    useShallow((s) => ({
+      currentVersion: s.currentVersion,
+      latestVersion: s.latestVersion,
+      hasUpdate: s.hasUpdate,
+      releaseUrl: s.releaseUrl,
+    }))
+  );
 
   const navItems: {
     icon: typeof Server;

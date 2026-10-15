@@ -3,7 +3,8 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { listen } from "@tauri-apps/api/event";
-import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
+import { copyText } from "../../lib/clipboard";
 import {
   Copy,
   Clipboard,
@@ -139,11 +140,7 @@ async function handleCopyFromTerminal(
   const selection = term.getSelection();
   if (selection) {
     try {
-      try {
-        await writeText(selection);
-      } catch {
-        await navigator.clipboard.writeText(selection);
-      }
+      await copyText(selection);
       const count = selection.length;
       onNotify?.(count > 1 ? `Copied to clipboard (${count} chars)` : "Copied to clipboard");
     } catch (err) {
