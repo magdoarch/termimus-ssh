@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -84,6 +85,9 @@ type PushBundleRequest struct {
 	DeviceID      string          `json:"device_id"`
 	DeviceName    string          `json:"device_name"`
 	EncryptedBlob json.RawMessage `json:"encrypted_blob"`
+	// BaseVersion is the revision the client's data is based on. When set, the
+	// push is rejected with 409 if another device has pushed since.
+	BaseVersion *int64 `json:"base_version,omitempty"`
 }
 
 // ── POST /api/v1/sync/bundle ────────────────────────────────────────────────
@@ -143,7 +147,15 @@ func (h *Handler) PostBundle(w http.ResponseWriter, r *http.Request) {
 		req.DeviceName = "Termimus Client"
 	}
 
-	newVersion, err := h.db.SaveRevision(req.DeviceID, req.DeviceName, blobStr)
+	newVersion, err := h.db.SaveRevision(req.DeviceID, req.DeviceName, blobStr, req.BaseVersion)
+	var conflict *db.ConflictError
+	if errors.As(err, &conflict) {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":          "Sync conflict: another device pushed a newer revision. Pull first, then push again.",
+			"latest_version": conflict.LatestVersion,
+		})
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to save revision: "+err.Error())
 		return

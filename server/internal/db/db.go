@@ -132,7 +132,20 @@ func (d *DB) GetLatestBlob() (string, int64, error) {
 	return blob, version, nil
 }
 
-func (d *DB) SaveRevision(deviceID, deviceName, encryptedBlob string) (int64, error) {
+// ConflictError is returned by SaveRevision when the client's base version is
+// no longer the latest revision (another device pushed in the meantime).
+type ConflictError struct {
+	LatestVersion int64
+}
+
+func (e *ConflictError) Error() string {
+	return fmt.Sprintf("sync conflict: server is at revision %d", e.LatestVersion)
+}
+
+// SaveRevision stores a new revision. When baseVersion is non-nil it must equal
+// the current latest version (0 when empty), otherwise a *ConflictError is
+// returned and nothing is written. A nil baseVersion (older clients) skips the check.
+func (d *DB) SaveRevision(deviceID, deviceName, encryptedBlob string, baseVersion *int64) (int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -149,10 +162,14 @@ func (d *DB) SaveRevision(deviceID, deviceName, encryptedBlob string) (int64, er
 		return 0, err
 	}
 
-	nextVersion := int64(1)
+	latest := int64(0)
 	if currentVersion.Valid {
-		nextVersion = currentVersion.Int64 + 1
+		latest = currentVersion.Int64
 	}
+	if baseVersion != nil && *baseVersion != latest {
+		return 0, &ConflictError{LatestVersion: latest}
+	}
+	nextVersion := latest + 1
 
 	// Insert revision
 	_, err = tx.Exec(`

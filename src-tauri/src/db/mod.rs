@@ -968,16 +968,45 @@ impl Database {
     /// Restore a backup bundle. When `replace_all` is true, every table this
     /// bundle covers is wiped first so the import produces an exact copy;
     /// otherwise rows are merged/upserted by their existing primary keys.
-    /// Returns (summary, safety_snapshot_json) — the snapshot is Some(_) only
-    /// when replace_all == true so the caller can persist it for rollback.
-    pub fn import_backup_bundle(&self, bundle: &BackupBundle, replace_all: bool) -> Result<(ImportSummary, Option<String>)> {
-        let safety_snapshot_json: Option<String> = if replace_all {
-            // Auto-snapshot current data as a safety net before wiping anything.
-            let snapshot = self.export_backup_bundle("0.1.0")?;
-            Some(serde_json::to_string_pretty(&snapshot).unwrap_or_default())
-        } else {
-            None
-        };
+    ///
+    /// The whole import runs in one SQLite transaction: if anything fails
+    /// half-way (FK violation, I/O error) the database is left untouched.
+    pub fn import_backup_bundle(&self, bundle: &BackupBundle, replace_all: bool) -> Result<ImportSummary> {
+        // The helper methods below each take the connection lock briefly; the
+        // transaction belongs to the connection, so their statements still run
+        // inside it.
+        self.conn.lock().unwrap().execute_batch("BEGIN IMMEDIATE")?;
+        let result = self.import_backup_bundle_inner(bundle, replace_all);
+        let conn = self.conn.lock().unwrap();
+        let committed = result.and_then(|summary| conn.execute_batch("COMMIT").map(|_| summary));
+        if committed.is_err() {
+            let _ = conn.execute_batch("ROLLBACK");
+        }
+        committed
+    }
+
+    fn row_exists(&self, table: &str, id: &str) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1)"),
+            params![id],
+            |row| row.get(0),
+        )
+    }
+
+    fn import_backup_bundle_inner(&self, bundle: &BackupBundle, replace_all: bool) -> Result<ImportSummary> {
+        // Credentials are encrypted with the vault key, which is derived from the
+        // master password + salt of the device that exported them. When merging
+        // into a vault with a different salt/verifier (independently set up, or
+        // the master password was changed elsewhere), the local key can't
+        // decrypt them — importing would replace working credentials with
+        // unreadable ones, so skip them and report it instead.
+        let local_salt = self.get_vault_meta("salt")?;
+        let credentials_key_mismatch = !replace_all
+            && local_salt.is_some()
+            && !bundle.credentials.is_empty()
+            && (bundle.vault_salt != local_salt
+                || bundle.vault_verifier_ciphertext != self.get_vault_meta("verifier_ciphertext")?);
 
         {
             let conn = self.conn.lock().unwrap();
@@ -1096,7 +1125,8 @@ impl Database {
             }
             self.save_folder(folder)?;
         }
-        for cred in &bundle.credentials {
+        let credentials_skipped = if credentials_key_mismatch { bundle.credentials.len() } else { 0 };
+        for cred in bundle.credentials.iter().filter(|_| !credentials_key_mismatch) {
             if !replace_all {
                 let cred_time = if !cred.updated_at.is_empty() { &cred.updated_at } else { &cred.created_at };
                 if let Ok(Some(del_at)) = self.is_tombstoned("credential", &cred.id) {
@@ -1130,9 +1160,30 @@ impl Database {
                     }
                 }
             }
-            self.save_host(host)?;
+            let mut host = host.clone();
+            if credentials_key_mismatch {
+                // The remote credential wasn't imported; keep whatever this host
+                // already uses locally.
+                host.credential_id = self.get_host(&host.id)?.and_then(|local| local.credential_id);
+            }
+            // Drop references to rows that were skipped (tombstoned/older), which
+            // would otherwise fail the FK constraint and abort the whole import.
+            if let Some(cid) = &host.credential_id {
+                if !self.row_exists("credentials", cid)? {
+                    host.credential_id = None;
+                }
+            }
+            if let Some(fid) = &host.folder_id {
+                if !self.row_exists("folders", fid)? {
+                    host.folder_id = None;
+                }
+            }
+            self.save_host(&host)?;
         }
         for rule in &bundle.port_forwards {
+            if !self.row_exists("hosts", &rule.host_id)? {
+                continue;
+            }
             if !replace_all {
                 if let Ok(Some(del_at)) = self.is_tombstoned("port_forward", &rule.id) {
                     if rule.created_at <= del_at {
@@ -1232,9 +1283,9 @@ impl Database {
             }
         }
 
-        Ok((ImportSummary {
+        Ok(ImportSummary {
             folders: bundle.folders.len(),
-            credentials: bundle.credentials.len(),
+            credentials: bundle.credentials.len() - credentials_skipped,
             hosts: bundle.hosts.len(),
             port_forwards: bundle.port_forwards.len(),
             snippets: bundle.snippets.len(),
@@ -1243,7 +1294,9 @@ impl Database {
             workspace_presets: workspace_presets_imported,
             vault_meta_restored,
             safety_snapshot_path: None, // filled in by the command layer after writing to disk
-        }, safety_snapshot_json))
+            credentials_skipped,
+            server_version: None,
+        })
     }
 }
 

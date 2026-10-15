@@ -1462,30 +1462,40 @@ pub fn backup_import(
         b
     };
 
-    let (mut summary, safety_snapshot_json) = state
-        .db
-        .import_backup_bundle(&bundle, replace_all)
-        .map_err(|e| e.to_string())?;
-
-    // If vault metadata was replaced, the in-memory key is now stale — lock the vault
-    // so the user must re-authenticate with the restored master password.
-    if summary.vault_meta_restored && replace_all {
-        state.vault.lock();
-    }
-
-    // Write the safety snapshot to disk so the user can roll back if needed.
-    if let Some(snapshot_json) = safety_snapshot_json {
+    // Before a full replace, write a snapshot of the current data to disk so
+    // the user can roll back. Refuse to wipe anything if that fails.
+    let safety_snapshot_path = if replace_all {
+        let snapshot = state
+            .db
+            .export_backup_bundle(env!("CARGO_PKG_VERSION"))
+            .map_err(|e| format!("Could not snapshot current data before restore: {e}"))?;
+        let snapshot_json = serde_json::to_string_pretty(&snapshot).map_err(|e| e.to_string())?;
         let mut snap_path = dirs::config_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("termimus");
         let _ = std::fs::create_dir_all(&snap_path);
         snap_path.push("auto-backup-pre-restore.json");
-        let path_str = snap_path.to_string_lossy().to_string();
-        if let Err(e) = std::fs::write(&snap_path, &snapshot_json) {
-            eprintln!("Warning: could not write safety snapshot to {path_str}: {e}");
-        } else {
-            summary.safety_snapshot_path = Some(path_str);
-        }
+        std::fs::write(&snap_path, &snapshot_json).map_err(|e| {
+            format!(
+                "Restore aborted: could not write safety snapshot to {}: {e}",
+                snap_path.display()
+            )
+        })?;
+        Some(snap_path.to_string_lossy().to_string())
+    } else {
+        None
+    };
+
+    let mut summary = state
+        .db
+        .import_backup_bundle(&bundle, replace_all)
+        .map_err(|e| e.to_string())?;
+    summary.safety_snapshot_path = safety_snapshot_path;
+
+    // If vault metadata was replaced, the in-memory key is now stale — lock the vault
+    // so the user must re-authenticate with the restored master password.
+    if summary.vault_meta_restored && replace_all {
+        state.vault.lock();
     }
 
     Ok(summary)
@@ -1543,7 +1553,15 @@ struct PushBundleRequest<'a> {
     device_id: &'a str,
     device_name: &'a str,
     encrypted_blob: String,
+    /// Revision this device's data is based on; the relay answers 409 if
+    /// another device has pushed since.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    base_version: Option<u64>,
 }
+
+/// Prefix of the error returned by `sync_push` on a 409, so the frontend can
+/// pull/merge and retry instead of overwriting another device's changes.
+const SYNC_CONFLICT_PREFIX: &str = "SYNC_CONFLICT:";
 
 #[derive(Debug, Deserialize)]
 struct PushBundleResponse {
@@ -1553,6 +1571,7 @@ struct PushBundleResponse {
 #[derive(Debug, Deserialize)]
 struct GetBundleResponse {
     encrypted_blob: Option<String>,
+    version: Option<u64>,
 }
 
 fn sync_http_client() -> Result<reqwest::Client, String> {
@@ -1655,6 +1674,7 @@ pub async fn sync_push(
     sync_password: String,
     device_id: String,
     device_name: String,
+    base_version: Option<u64>,
 ) -> Result<u64, String> {
     let password = sync_password.trim();
     if password.is_empty() {
@@ -1671,6 +1691,7 @@ pub async fn sync_push(
             device_id: &device_id,
             device_name: &device_name,
             encrypted_blob,
+            base_version,
         }),
         &auth_token,
     );
@@ -1684,6 +1705,11 @@ pub async fn sync_push(
     if !status.is_success() {
         if status.as_u16() == 401 {
             return Err("Authentication failed: invalid or missing Auth Token (configured via TERMIMUS_AUTH_TOKEN on server)".to_string());
+        }
+        if status.as_u16() == 409 {
+            return Err(format!(
+                "{SYNC_CONFLICT_PREFIX} another device pushed newer changes. Pull first, then push again."
+            ));
         }
         let err_body: ErrorResponse = res.json().await.unwrap_or(ErrorResponse { error: None });
         return Err(err_body.error.unwrap_or_else(|| format!("Server returned HTTP {status}")));
@@ -1739,12 +1765,14 @@ pub async fn sync_pull(
         return Err("Sync Passphrase is required to decrypt the incoming sync bundle.".to_string());
     }
 
-    backup_import(
+    let mut summary = backup_import(
         state,
         encrypted_blob,
         replace_all.unwrap_or(false),
         Some(password.to_string()),
-    )
+    )?;
+    summary.server_version = body.version;
+    Ok(summary)
 }
 
 // ── Sync secrets ────────────────────────────────────────────────────────────
