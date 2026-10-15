@@ -30,6 +30,7 @@ import { useAutoLock } from "./hooks/useAutoLock";
 import { useLiveSync } from "./hooks/useLiveSync";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { applyAppTheme } from "./lib/appTheme";
+import { api } from "./lib/api";
 
 // Helper component for native-feel stacked views:
 // Keeps views mounted in the DOM once visited, switching visibility in 0ms
@@ -60,6 +61,7 @@ function App() {
   const tabsCount = useSessionStore((s) => s.tabs.length);
   const prevTabsCountRef = useRef(tabsCount);
   const appTheme = useSettingsStore((s) => s.appTheme);
+  const shareConnections = useSettingsStore((s) => s.shareConnections);
 
   const handleNavChange = useCallback((tab: ActiveTab) => {
     setActiveNav(tab);
@@ -97,6 +99,11 @@ function App() {
   useEffect(() => {
     applyAppTheme(appTheme);
   }, [appTheme]);
+
+  // The backend shares connections unless told otherwise (Settings > SSH & Sessions).
+  useEffect(() => {
+    api.setConnectionSharing(shareConnections).catch(() => {});
+  }, [shareConnections]);
 
   // Enforce small minimum window size (480x360) so users can snap/tile to half screen
   // on sub-1080p displays (e.g. 1366x768 half is 683px, 1280x800 half is 640px).

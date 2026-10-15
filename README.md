@@ -61,7 +61,9 @@ Prebuilt installers for every release are published automatically to the **[GitH
 ### 🔐 Logins, 2FA & Jump Hosts
 - **Two-Factor Login**: Keyboard-interactive prompts (OTP codes, Duo, PAM questions) appear in a dialog.
 - **Asked When Needed**: Hosts without a saved password, and keys without a saved passphrase, ask at login instead of failing.
-- **Import `~/.ssh/config`**: Hosts, their keys, ProxyJump jump hosts and the host keys in `~/.ssh/known_hosts` in one step, with a preview first.
+- **Jump Host Chains**: Reach hosts through any chain of bastions (ProxyJump, up to 8 hops) — for terminals, SFTP, tunnels and remote desktops.
+- **Shared Connections**: Tabs, SFTP panes and tunnels to the same host share one SSH connection (like OpenSSH's ControlMaster), so a password or 2FA code is asked once.
+- **Import `~/.ssh/config`**: Hosts, their keys, ProxyJump chains and the host keys in `~/.ssh/known_hosts` in one step, with a preview first.
 
 ### 🖼️ Remote Desktop
 - **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.

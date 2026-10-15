@@ -4,8 +4,10 @@
 //!   cargo test -- --ignored ssh::e2e_tests
 //!
 //! The user must be able to log in with the key, open shells and SFTP, and
-//! forward TCP back to the server itself (used as its own jump host).
-//! `SSH_TEST_DIR` (default /tmp) is where files are created on the server.
+//! forward TCP back to the server itself (used as its own jump host, also
+//! under the name `localhost`). The sharing checks expect sshd's default
+//! `MaxSessions 10`. `SSH_TEST_DIR` (default /tmp) is where files are
+//! created on the server.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,19 +38,25 @@ impl TestServer {
         }
     }
 
-    pub fn auth(&self) -> SshAuth {
-        SshAuth::PrivateKey { pem: self.key.clone(), passphrase: None }
-    }
-
-    /// The server reached through itself as the jump host.
-    pub fn jump(&self) -> JumpHostConfig {
-        JumpHostConfig {
-            address: self.address.clone(),
+    /// A hop to the server under `address`, shared under `key`.
+    pub fn hop(&self, address: &str, key: Option<&str>) -> Hop {
+        Hop {
+            key: key.map(str::to_string),
+            address: address.to_string(),
             port: self.port,
             username: self.user.clone(),
-            auth: self.auth(),
+            auth: SshAuth::PrivateKey { pem: self.key.clone(), passphrase: None },
         }
     }
+
+    /// Straight to the server, shared under `key`.
+    pub fn route(&self, key: Option<&str>) -> Route {
+        vec![self.hop(&self.address, key)]
+    }
+}
+
+pub(crate) fn no_progress() -> impl Fn(u8, &str, &str) + Sync {
+    |_: u8, _: &str, _: &str| {}
 }
 
 /// Output of `channel` until `needle` shows up (or the channel ends).
@@ -77,10 +85,10 @@ pub(crate) async fn read_until(channel: &mut Channel<Msg>, needle: &str) -> Stri
 async fn shell_with_pty_runs_commands_and_resizes() {
     let server = TestServer::from_env();
     let db = Arc::new(Database::in_memory().unwrap());
-    let (handle, _) = connect_authenticated(db, &server.address, server.port, &server.user, &server.auth(), None)
-        .await
-        .unwrap();
-    let mut channel = handle.channel_open_session().await.unwrap();
+    let pool = ConnectionPool::new();
+    let (connection, reused) = pool.connect(&db, &server.route(None), &no_progress()).await.unwrap();
+    assert!(!reused);
+    let mut channel = connection.open_session().await.unwrap();
     channel.request_pty(true, "xterm-256color", 100, 30, 0, 0, &[]).await.unwrap();
     channel.request_shell(true).await.unwrap();
     channel.data(&b"stty size; echo marker-$((40+2))\n"[..]).await.unwrap();
@@ -100,8 +108,9 @@ async fn shell_with_pty_runs_commands_and_resizes() {
 async fn sftp_round_trip() {
     let server = TestServer::from_env();
     let db = Arc::new(Database::in_memory().unwrap());
+    let pool = ConnectionPool::new();
     let sftp = crate::sftp::SftpManager::new();
-    sftp.connect(db, "e2e".into(), "host".into(), server.address.clone(), server.port, server.user.clone(), server.auth(), None)
+    sftp.connect(db, &pool, "e2e".into(), "host".into(), server.route(Some("sftp-e2e")))
         .await
         .unwrap();
     let dir = format!("{}/termimus-sftp-e2e-{}", server.dir, uuid::Uuid::new_v4());
@@ -118,17 +127,88 @@ async fn sftp_round_trip() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
-async fn exec_through_jump_host() {
+async fn exec_through_a_chain_of_jump_hosts() {
     let server = TestServer::from_env();
     let db = Arc::new(Database::in_memory().unwrap());
-    let jump = server.jump();
-    let (handle, jump_handle) =
-        connect_authenticated(db, "localhost", server.port, &server.user, &server.auth(), Some(&jump))
+    let pool = ConnectionPool::new();
+    // server -> localhost -> server: two jump hosts in front of the target.
+    let route = vec![
+        server.hop(&server.address, Some(">a")),
+        server.hop("localhost", Some(">a>b")),
+        server.hop(&server.address, Some(">a>b>c")),
+    ];
+    let steps = std::sync::Mutex::new(Vec::new());
+    let record = |_: u8, _: &str, message: &str| steps.lock().unwrap().push(message.to_string());
+    let (target, _) = pool.connect(&db, &route, &record).await.unwrap();
+    let output = target.exec("echo via-$((6*7))", None, 1024).await.unwrap();
+    assert_eq!(output.stdout_text().trim(), "via-42");
+    assert_eq!(output.exit_status, Some(0));
+    let steps = steps.lock().unwrap().join("\n");
+    assert!(steps.contains("jump host 1/2"), "{steps}");
+    assert!(steps.contains("jump host 2/2"), "{steps}");
+
+    // Another host behind the same first jump host reuses its connection.
+    let other = vec![server.hop(&server.address, Some(">a")), server.hop("localhost", Some(">a>d"))];
+    let steps = std::sync::Mutex::new(Vec::new());
+    let record = |_: u8, _: &str, message: &str| steps.lock().unwrap().push(message.to_string());
+    let (other, reused) = pool.connect(&db, &other, &record).await.unwrap();
+    assert!(!reused);
+    assert!(steps.lock().unwrap().iter().any(|s| s.starts_with("Reusing the open connection to jump host")));
+    assert_eq!(other.exec("echo second", None, 64).await.unwrap().stdout_text().trim(), "second");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn connections_are_shared_and_closed_after_the_last_user() {
+    let server = TestServer::from_env();
+    let db = Arc::new(Database::in_memory().unwrap());
+    let pool = ConnectionPool::new();
+    let route = server.route(Some("shared"));
+
+    let (first, reused) = pool.connect(&db, &route, &no_progress()).await.unwrap();
+    assert!(!reused);
+    // Concurrent connects to the same host log in once.
+    let quiet = no_progress();
+    let (a, b) = tokio::join!(pool.connect(&db, &route, &quiet), pool.connect(&db, &route, &quiet));
+    let (a, b) = (a.unwrap(), b.unwrap());
+    assert!(a.1 && b.1);
+    assert!(Arc::ptr_eq(&first, &a.0) && Arc::ptr_eq(&first, &b.0));
+    let pid = |c: Arc<SshConnection>| async move { c.exec("echo $PPID", None, 64).await.unwrap().stdout_text() };
+    // Same sshd session process serves both channels.
+    assert_eq!(pid(first.clone()).await, pid(a.0.clone()).await);
+
+    // Unshared routes and sharing switched off get their own connection.
+    let (own, _) = pool.connect(&db, &server.route(None), &no_progress()).await.unwrap();
+    assert!(!Arc::ptr_eq(&own, &first));
+    pool.set_sharing(false);
+    let (separate, reused) = pool.connect(&db, &route, &no_progress()).await.unwrap();
+    assert!(!reused && !Arc::ptr_eq(&separate, &first));
+    pool.set_sharing(true);
+
+    // Once every user is gone the connection closes; the next connect logs in again.
+    let weak = Arc::downgrade(&first);
+    drop((first, a, b));
+    assert!(weak.upgrade().is_none());
+    let (again, reused) = pool.connect(&db, &route, &no_progress()).await.unwrap();
+    assert!(!reused);
+    drop(again);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn sftp_falls_back_to_its_own_connection_at_max_sessions() {
+    let server = TestServer::from_env();
+    let db = Arc::new(Database::in_memory().unwrap());
+    let pool = ConnectionPool::new();
+    let sftp = crate::sftp::SftpManager::new();
+    // One more SFTP session than sshd's MaxSessions (10) allows per connection.
+    for i in 0..11 {
+        sftp.connect(db.clone(), &pool, format!("s{i}"), "host".into(), server.route(Some("max-sessions")))
             .await
-            .unwrap();
-    assert!(jump_handle.is_some());
-    let mut channel = handle.channel_open_session().await.unwrap();
-    channel.exec(true, "echo via-$((6*7))").await.unwrap();
-    let out = read_until(&mut channel, "via-42").await;
-    assert!(out.contains("via-42"), "{out}");
+            .unwrap_or_else(|e| panic!("session {i}: {e}"));
+    }
+    for i in 0..11 {
+        assert!(!sftp.list(&format!("s{i}"), "/").await.unwrap().is_empty());
+        sftp.disconnect(&format!("s{i}")).await.unwrap();
+    }
 }

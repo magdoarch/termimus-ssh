@@ -14,7 +14,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
   - `src/lib/api.ts` — the only place that calls `invoke(...)`; every Tauri command has a typed wrapper here. Add new commands here, not ad-hoc `invoke` calls in components.
   - `src/lib/format.ts` — shared formatting helpers (bytes, dates, paths).
 - **Backend**: Rust in `src-tauri/src/`.
-  - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`). `auth_prompt.rs`: keyboard-interactive/2FA prompts; `e2e_tests.rs`: ignored tests against a real sshd (`SSH_TEST_*` env).
+  - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`). `conn.rs`: connection pool and jump-host routes; `auth_prompt.rs`: keyboard-interactive/2FA prompts; `e2e_tests.rs`: ignored tests against a real sshd (`SSH_TEST_*` env).
   - `sshconfig/` — `~/.ssh/config` + `known_hosts` parsing and the import.
   - `remote/` — VNC (`vnc-rs`) and RDP (IronRDP) sessions.
   - `sftp/` — SFTP manager (`russh-sftp`) + local filesystem helpers.
@@ -26,6 +26,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
 ## Conventions
 
 - **Every SSH-family connection (terminal, SFTP, tunnel) must go through `SshClientHandler`** with `db: Arc<Database>` passed in, so Trust-On-First-Use host key verification and MITM protection apply uniformly. Don't construct a bare `russh::client::connect` without it.
+- **Connect through the pool**: build a route with `ssh_route`/`jump_route` (`commands/mod.rs`) and call `state.pool.connect(...)` (`ssh/conn.rs`). It follows jump host chains, does TOFU and login prompts, and shares one connection per host between tabs, SFTP and tunnels (ControlMaster-style). Close only the channels you opened (plain `Channel`s don't close on drop; `into_stream()` ones do) and never disconnect a pooled `SshConnection` — drop its `Arc`. When a reused connection refuses a session channel (sshd `MaxSessions`), retry with `pool.connect_new`.
 - **Credentials are never stored or transmitted as plaintext.** `Credential.ciphertext`/`nonce` are AES-256-GCM output; encrypt/decrypt only through `VaultManager`. The vault must be unlocked (`state.vault.is_unlocked()`) before touching secrets.
 - **New Tauri commands**: add the `#[tauri::command]` fn in `commands/mod.rs`, add it to `generate_handler![...]` in `lib.rs`, then add a typed wrapper in `src/lib/api.ts`. All three steps are required or the command silently won't be callable from the frontend.
 - **Tauri v2 Capabilities & Permissions**: plugins and window APIs require explicit entries in `src-tauri/capabilities/default.json`. Beware of plugins whose default capability is empty (e.g. `tauri-plugin-clipboard-manager` has `clipboard-manager:default` with `permissions = []` for security); always grant explicit permissions such as `"clipboard-manager:allow-read-text"` and `"clipboard-manager:allow-write-text"`.

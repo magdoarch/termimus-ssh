@@ -28,6 +28,21 @@ export const PROTOCOL_LABELS: Record<HostProtocol, string> = { ssh: "SSH", vnc: 
 
 /** SSH hosts support terminal, SFTP, tunnels and acting as a jump host. */
 export const isSshHost = (host: Pick<Host, "protocol">) => (host.protocol ?? "ssh") === "ssh";
+
+/** `host`, then its jump host, that host's own jump host, and so on (stops at a loop). */
+export function jumpChain(host: Host, hosts: Host[]): Host[] {
+  const chain: Host[] = [host];
+  const seen = new Set([host.id]);
+  let next = host.jump_host_id;
+  while (next) {
+    const jump = hosts.find((h) => h.id === next);
+    if (!jump || seen.has(jump.id)) break;
+    seen.add(jump.id);
+    chain.push(jump);
+    next = jump.jump_host_id;
+  }
+  return chain;
+}
 /** "none" is only valid for VNC servers without authentication */
 export type HostAuthMethod = "password" | "private_key" | "agent" | "none";
 
@@ -225,8 +240,10 @@ export interface SshConfigHostPreview {
   /** The config names no key; this is ssh's default key */
   defaultIdentity: boolean;
   proxyJump: string | null;
-  /** Key of the jump host the import would create for it */
-  jumpIdentityFile: string | null;
+  /** The jump hosts it goes through, outermost first */
+  jumpChain: string[];
+  /** Keys of the jump hosts the import would create for it */
+  jumpIdentityFiles: string[];
   /** Label of the Termimus host with the same address, port and user */
   existingHost: string | null;
   /** An earlier alias for the same address, port and user */
@@ -541,6 +558,10 @@ export const api = {
     invoke<void>("remote_input", { sessionId, events }),
   remoteDisconnect: (sessionId: string) =>
     invoke<void>("remote_disconnect", { sessionId }),
+
+  /** Share one SSH connection per host between tabs, SFTP and tunnels */
+  setConnectionSharing: (enabled: boolean) =>
+    invoke<void>("ssh_set_connection_sharing", { enabled }),
 
   /** Answer a login prompt; null cancels that login */
   respondAuthPrompt: (requestId: string, answers: string[] | null) =>

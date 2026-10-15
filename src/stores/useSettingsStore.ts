@@ -23,7 +23,10 @@ interface SettingsState {
   autoLockPolicy: AutoLockPolicy;
   /** UI theme; read by public/theme-init.js before the bundle loads */
   appTheme: AppTheme;
+  /** One SSH connection per host, shared by tabs, SFTP and tunnels (backend pool) */
+  shareConnections: boolean;
   setAppTheme: (v: AppTheme) => void;
+  setShareConnections: (v: boolean) => void;
   setUseOsKeyring: (v: boolean) => void;
   setUseBiometrics: (v: boolean) => void;
   setAutoLockPolicy: (v: AutoLockPolicy) => void;
@@ -36,7 +39,9 @@ export const useSettingsStore = create<SettingsState>()(
       useBiometrics: false,
       autoLockPolicy: "on_close",
       appTheme: "dark",
+      shareConnections: true,
       setAppTheme: (v) => set({ appTheme: v }),
+      setShareConnections: (v) => set({ shareConnections: v }),
       setUseOsKeyring: (v) => set({ useOsKeyring: v }),
       setUseBiometrics: (v) => set({ useBiometrics: v }),
       setAutoLockPolicy: (v) => set({ autoLockPolicy: v }),

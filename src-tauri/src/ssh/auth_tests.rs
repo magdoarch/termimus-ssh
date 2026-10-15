@@ -176,7 +176,7 @@ async fn login(port: u16, auth: SshAuth, user: &ScriptedUser) -> Result<bool, St
         address: "127.0.0.1".into(),
         port,
         db: Arc::new(Database::in_memory().unwrap()),
-        forwarded_tcpip: None,
+        forwards: Default::default(),
     };
     let tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
     let mut handle = client::connect_stream(default_client_config(), tcp, handler).await.unwrap();

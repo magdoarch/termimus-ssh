@@ -3,7 +3,7 @@ use crate::db::Database;
 use crate::pty::PtyManager;
 use crate::remote::{RdpOptions, RemoteDesktopManager, RemoteInput, RemoteProtocolTarget, RemoteTarget, VncOptions};
 use crate::sftp::{self, FileEntry, SftpManager};
-use crate::ssh::{SessionManager, SshAuth};
+use crate::ssh::{ConnectionPool, Hop, Route, SessionManager, SshAuth};
 use crate::tunnel::TunnelManager;
 use crate::vault::VaultManager;
 use chrono::Utc;
@@ -24,6 +24,8 @@ pub struct AppState {
     pub tunnel: Arc<TunnelManager>,
     pub pty: Arc<PtyManager>,
     pub remote: Arc<RemoteDesktopManager>,
+    /// SSH connections shared by terminal tabs, SFTP, tunnels and jump hosts.
+    pub pool: Arc<ConnectionPool>,
 }
 
 /// Minimum master password length for new or changed vault passwords.
@@ -609,29 +611,89 @@ fn resolve_host_auth(state: &AppState, host: &Host) -> Result<SshAuth, String> {
     }
 }
 
-/// Resolve the host's bastion (if any) into a `JumpHostConfig`. Every
-/// SSH-family connection (terminal, SFTP, tunnel) must use this so a host
-/// behind a jump host is never dialed directly on whatever network the user
+/// The jump hosts in front of `host`, outermost first: its jump host's own
+/// jump host comes before it, and so on. Every SSH-family connection
+/// (terminal, SFTP, tunnel, remote desktop) goes through this, so a host
+/// behind a bastion is never dialed directly on whatever network the user
 /// happens to be on.
-fn resolve_jump_host(state: &AppState, host: &Host) -> Result<Option<crate::ssh::JumpHostConfig>, String> {
-    let Some(ref jid) = host.jump_host_id else {
-        return Ok(None);
-    };
-    let jump = state
-        .db
-        .get_host(jid)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Jump Host / Bastion server not found".to_string())?;
-    if jump.protocol != "ssh" {
-        return Err(format!("Jump Host '{}' must be an SSH host", jump.label));
+fn jump_chain(state: &AppState, host: &Host) -> Result<Vec<Host>, String> {
+    let mut chain: Vec<Host> = Vec::new();
+    let mut seen = std::collections::HashSet::from([host.id.clone()]);
+    let mut next = host.jump_host_id.clone();
+    while let Some(jump_id) = next {
+        if chain.len() == crate::ssh::conn::MAX_JUMP_HOPS {
+            return Err(format!(
+                "'{}' is behind more than {} jump hosts",
+                host.label,
+                crate::ssh::conn::MAX_JUMP_HOPS
+            ));
+        }
+        let jump = state
+            .db
+            .get_host(&jump_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Jump Host / Bastion server not found".to_string())?;
+        if !seen.insert(jump.id.clone()) {
+            return Err(format!(
+                "The jump hosts of '{}' go around in a circle (at '{}')",
+                host.label, jump.label
+            ));
+        }
+        if jump.protocol != "ssh" {
+            return Err(format!("Jump Host '{}' must be an SSH host", jump.label));
+        }
+        next = jump.jump_host_id.clone();
+        chain.push(jump);
     }
-    let jump_auth = resolve_host_auth(state, &jump)?;
-    Ok(Some(crate::ssh::JumpHostConfig {
-        address: jump.address,
-        port: jump.port,
-        username: jump.username,
-        auth: jump_auth,
-    }))
+    chain.reverse();
+    Ok(chain)
+}
+
+/// Logins for `hosts` in order. A hop's key covers what the login depends
+/// on and the hosts before it, so a connection is only shared by routes that
+/// reach it the same way, and editing the host's address, user or credential
+/// starts a fresh one. (Not `updated_at`: OS detection and sync bump it.)
+fn hops_for(state: &AppState, hosts: &[Host]) -> Result<Route, String> {
+    let mut key = String::new();
+    hosts
+        .iter()
+        .map(|host| {
+            key = format!(
+                "{key}>{}|{}|{}|{}|{}|{}",
+                host.id,
+                host.address,
+                host.port,
+                host.username,
+                host.auth_method,
+                host.credential_id.as_deref().unwrap_or_default()
+            );
+            Ok(Hop {
+                key: Some(key.clone()),
+                address: host.address.clone(),
+                port: host.port,
+                username: host.username.clone(),
+                auth: resolve_host_auth(state, host)?,
+            })
+        })
+        .collect()
+}
+
+/// How an SSH host is reached: its jump hosts, then the host itself.
+fn ssh_route(state: &AppState, host: &Host) -> Result<Route, String> {
+    let mut hosts = jump_chain(state, host)?;
+    hosts.push(host.clone());
+    hops_for(state, &hosts)
+}
+
+/// The jump hosts alone, for VNC/RDP servers behind a bastion.
+fn jump_route(state: &AppState, host: &Host) -> Result<Route, String> {
+    hops_for(state, &jump_chain(state, host)?)
+}
+
+/// Settings: share one SSH connection per host (on by default).
+#[tauri::command]
+pub fn ssh_set_connection_sharing(state: State<AppState>, enabled: bool) {
+    state.pool.set_sharing(enabled);
 }
 
 #[tauri::command]
@@ -649,24 +711,19 @@ pub async fn ssh_connect(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Host not found".to_string())?;
 
-    let auth = resolve_host_auth(&state, &host)?;
-
-    let jump_host = resolve_jump_host(&state, &host)?;
+    let route = ssh_route(&state, &host)?;
 
     let result = state
         .ssh
         .connect(
             app,
             state.db.clone(),
+            &state.pool,
             session_id,
             Some(host_id.clone()),
-            host.address,
-            host.port,
-            host.username,
-            auth,
+            route,
             cols,
             rows,
-            jump_host,
         )
         .await;
 
@@ -1038,21 +1095,10 @@ pub async fn sftp_connect(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Host not found".to_string())?;
 
-    let auth = resolve_host_auth(&state, &host)?;
-    let jump_host = resolve_jump_host(&state, &host)?;
-
+    let route = ssh_route(&state, &host)?;
     state
         .sftp
-        .connect(
-            state.db.clone(),
-            session_id,
-            host_id,
-            host.address,
-            host.port,
-            host.username,
-            auth,
-            jump_host,
-        )
+        .connect(state.db.clone(), &state.pool, session_id, host_id, route)
         .await
 }
 
@@ -1260,13 +1306,7 @@ pub async fn tunnel_start(
         .ok_or_else(|| "Target host not found".to_string())?;
 
     let spec = crate::tunnel::TunnelSpec::from_rule(&rule)?;
-    let ssh = crate::tunnel::SshTarget {
-        auth: resolve_host_auth(&state, &host)?,
-        jump: resolve_jump_host(&state, &host)?,
-        address: host.address,
-        port: host.port,
-        username: host.username,
-    };
+    let route = ssh_route(&state, &host)?;
     // One app-wide event so the UI can track every rule with a single
     // listener (payload: { ruleId, state: "started" | "stopped", error }).
     let status: crate::tunnel::StatusSink = Arc::new(move |status: crate::tunnel::TunnelStatus| {
@@ -1275,7 +1315,7 @@ pub async fn tunnel_start(
 
     state
         .tunnel
-        .start(state.db.clone(), rule_id, ssh, spec, status)
+        .start(state.db.clone(), &state.pool, rule_id, route, spec, status)
         .await
 }
 
@@ -2038,12 +2078,12 @@ pub async fn remote_connect(
     let target = RemoteTarget {
         address: host.address.clone(),
         port: host.port,
-        jump: resolve_jump_host(&state, &host)?,
+        jump_route: jump_route(&state, &host)?,
         protocol,
     };
     state
         .remote
-        .connect(app, state.db.clone(), session_id, target, on_frame)
+        .connect(app, state.db.clone(), &state.pool, session_id, target, on_frame)
         .await?;
 
     let _ = state.db.touch_host_last_connected(&host_id);
