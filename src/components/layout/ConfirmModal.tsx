@@ -73,7 +73,7 @@ export function ConfirmModal() {
             type="button"
             disabled={submitting}
             onClick={close}
-            className="rounded-lg p-1 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-white transition disabled:opacity-50"
+            className="rounded-lg p-1 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition disabled:opacity-50"
           >
             <X size={16} />
           </button>
@@ -90,7 +90,7 @@ export function ConfirmModal() {
             type="button"
             disabled={submitting}
             onClick={close}
-            className="rounded-xl border border-[var(--border)] bg-[var(--surface-container)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-high)] hover:text-white transition disabled:opacity-50"
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface-container)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition disabled:opacity-50"
           >
             {cancelLabel}
           </button>

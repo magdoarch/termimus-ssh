@@ -58,7 +58,7 @@ export function SettingsView() {
     badgeDot?: boolean;
   }[] = [
     { id: "security", label: "Security & Vault", icon: Lock },
-    { id: "terminal", label: "Terminal & Theme", icon: Palette },
+    { id: "terminal", label: "Appearance & Terminal", icon: Palette },
     { id: "sync", label: "Self-Hosted Sync", icon: Cloud },
     {
       id: "known_hosts",
@@ -515,7 +515,7 @@ function KnownHostsTab() {
               onClick={() => refresh()}
               disabled={isLoading}
               title="Refresh known hosts"
-              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-container)] hover:text-white transition-colors"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors"
             >
               <RotateCw size={14} className={isLoading ? "animate-spin" : ""} />
             </button>
@@ -830,7 +830,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
           <button
             onClick={onClose}
             disabled={submitting}
-            className="text-[var(--text-muted)] hover:text-white"
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
           >
             <X size={16} />
           </button>
@@ -903,7 +903,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={onClose}
                 disabled={submitting}
-                className="rounded-md px-3 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-container)] hover:text-white"
+                className="rounded-md px-3 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)]"
               >
                 Cancel
               </button>

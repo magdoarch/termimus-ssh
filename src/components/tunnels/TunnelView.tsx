@@ -379,7 +379,7 @@ const TunnelCard = memo(function TunnelCard({
             onClick={() => onEdit(rule)}
             disabled={isActive}
             title="Edit rule"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white disabled:opacity-30"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] disabled:opacity-30"
           >
             <Pencil size={13} />
           </button>

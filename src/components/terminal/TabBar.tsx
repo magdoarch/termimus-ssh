@@ -50,7 +50,7 @@ export function TabBar() {
                 e.stopPropagation();
                 closeSession(tab.id);
               }}
-              className="ml-auto rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+              className="ml-auto rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
             >
               <X size={12} />
             </button>

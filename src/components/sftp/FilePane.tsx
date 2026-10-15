@@ -415,7 +415,7 @@ export const FilePane = memo(function FilePane({
             disabled={disabled}
             title="Filter files"
             aria-label="Filter files"
-            className={`rounded p-1 hover:bg-[var(--border)] hover:text-white disabled:opacity-30 ${
+            className={`rounded p-1 hover:bg-[var(--border)] hover:text-[var(--text-primary)] disabled:opacity-30 ${
               isFilterOpen ? "text-[var(--primary)]" : "text-[var(--text-muted)]"
             }`}
           >
@@ -447,7 +447,7 @@ export const FilePane = memo(function FilePane({
                   }}
                   title="Clear filter"
                   aria-label="Clear filter"
-                  className="absolute right-1 rounded p-0.5 text-[var(--text-muted)] hover:text-white"
+                  className="absolute right-1 rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
                   <X size={12} />
                 </button>
@@ -458,7 +458,7 @@ export const FilePane = memo(function FilePane({
             onClick={() => onNavigate(parentPath(path))}
             disabled={disabled || path === "/" || !path}
             title="Go up"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white disabled:opacity-30"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] disabled:opacity-30"
           >
             <CornerLeftUp size={14} />
           </button>
@@ -466,7 +466,7 @@ export const FilePane = memo(function FilePane({
             onClick={() => setIsCreatingFolder((v) => !v)}
             disabled={disabled}
             title="New folder"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white disabled:opacity-30"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] disabled:opacity-30"
           >
             <FolderPlus size={14} />
           </button>
@@ -474,7 +474,7 @@ export const FilePane = memo(function FilePane({
             onClick={onRefresh}
             disabled={disabled || loading}
             title="Refresh"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white disabled:opacity-30"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] disabled:opacity-30"
           >
             <RotateCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
@@ -509,7 +509,7 @@ export const FilePane = memo(function FilePane({
           <button
             type="button"
             onClick={() => setIsCreatingFolder(false)}
-            className="text-xs text-[var(--text-muted)] hover:text-white"
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]"
           >
             Cancel
           </button>

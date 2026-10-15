@@ -47,7 +47,7 @@ export function FolderModal() {
           </div>
           <button
             onClick={closeFolderModal}
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
           >
             <X size={16} />
           </button>
@@ -78,7 +78,7 @@ export function FolderModal() {
             <button
               type="button"
               onClick={closeFolderModal}
-              className="rounded-md px-3.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+              className="rounded-md px-3.5 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
             >
               Cancel
             </button>

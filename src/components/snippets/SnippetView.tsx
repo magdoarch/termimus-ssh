@@ -398,7 +398,7 @@ const SnippetCard = memo(function SnippetCard({
               className={`rounded p-1 transition-colors ${
                 isRevealed
                   ? "text-[var(--warning)] bg-[var(--warning)]/15"
-                  : "text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+                  : "text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
               }`}
             >
               {isRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -407,14 +407,14 @@ const SnippetCard = memo(function SnippetCard({
           <button
             onClick={handleCopy}
             title={isCopied ? "Copied!" : "Copy command"}
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white transition-colors"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] transition-colors"
           >
             {isCopied ? <Check size={13} className="text-[var(--success)]" /> : <Copy size={13} />}
           </button>
           <button
             onClick={() => onEdit(snippet)}
             title="Edit snippet"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
           >
             <Pencil size={13} />
           </button>

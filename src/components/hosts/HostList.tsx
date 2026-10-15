@@ -364,7 +364,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                   className={`rounded-lg px-2.5 py-1.5 text-xs font-mono shrink-0 transition-colors cursor-pointer ${
                     selectedTag === "All"
                       ? "bg-[var(--surface-high)] font-semibold text-[var(--primary)] border border-[var(--primary)]/30"
-                      : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-white"
+                      : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   All
@@ -377,7 +377,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                     className={`rounded-lg px-2.5 py-1.5 text-xs font-mono shrink-0 transition-colors cursor-pointer ${
                       selectedTag === tag
                         ? "bg-[var(--surface-high)] font-semibold text-[var(--primary)] border border-[var(--primary)]/30"
-                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-white"
+                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                     }`}
                   >
                     {tag}
@@ -398,7 +398,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
                   viewMode === "grid"
                     ? "bg-[var(--surface-high)] text-[var(--primary)] font-semibold shadow-xs"
-                    : "text-[var(--text-muted)] hover:text-white"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 }`}
               >
                 <LayoutGrid size={15} />
@@ -410,7 +410,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
                   viewMode === "list"
                     ? "bg-[var(--surface-high)] text-[var(--primary)] font-semibold shadow-xs"
-                    : "text-[var(--text-muted)] hover:text-white"
+                    : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 }`}
               >
                 <List size={15} />
@@ -446,7 +446,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
               className={`rounded-lg px-2.5 py-1.5 text-xs font-mono shrink-0 transition-colors cursor-pointer ${
                 selectedTag === "All"
                   ? "bg-[var(--surface-high)] font-semibold text-[var(--primary)] border border-[var(--primary)]/30"
-                  : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-white"
+                  : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
               All
@@ -459,7 +459,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 className={`rounded-lg px-2.5 py-1.5 text-xs font-mono shrink-0 transition-colors cursor-pointer ${
                   selectedTag === tag
                     ? "bg-[var(--surface-high)] font-semibold text-[var(--primary)] border border-[var(--primary)]/30"
-                    : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-white"
+                    : "bg-[var(--surface-container)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                 }`}
               >
                 {tag}
@@ -477,7 +477,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setSelectedFolderId(null)}
-                className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-high)] hover:text-white transition"
+                className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition"
               >
                 <ArrowLeft size={13} />
                 <span>All Groups</span>
@@ -503,7 +503,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => openEditFolderModal(activeFolder)}
-                className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-2.5 py-1 text-xs text-[var(--text-secondary)] hover:text-white transition"
+                className="flex items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-2.5 py-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition"
                 title="Rename Group"
               >
                 <Pencil size={12} /> Rename
@@ -991,7 +991,7 @@ const FolderCard = memo(function FolderCard({
         <button
           onClick={() => onEdit(folder)}
           title="Rename"
-          className="rounded p-1 text-[var(--text-muted)] hover:text-white hover:bg-[var(--surface-high)]"
+          className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-high)]"
         >
           <Pencil size={11} />
         </button>
@@ -1111,7 +1111,7 @@ const HostCard = memo(function HostCard({
         <button
           onClick={() => onToggleMenu(host.id)}
           title="Options"
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-white transition"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition"
         >
           <MoreVertical size={14} />
         </button>

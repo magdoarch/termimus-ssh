@@ -479,8 +479,8 @@ export function Header({
                   title="Close tab (or middle-click)"
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-all cursor-pointer ${
                     isActive
-                      ? "opacity-60 hover:opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white"
-                      : "opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-white/10 text-[var(--text-muted)] hover:text-white"
+                      ? "opacity-60 hover:opacity-100 hover:bg-[var(--text-primary)]/10 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                      : "opacity-0 group-hover:opacity-70 hover:!opacity-100 hover:bg-[var(--text-primary)]/10 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                   }`}
                 >
                   <X size={12} strokeWidth={2.2} />

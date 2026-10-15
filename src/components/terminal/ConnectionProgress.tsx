@@ -126,7 +126,7 @@ export function ConnectionProgress({
   const stages = protocol === "vnc" ? VNC_STAGES : SSH_STAGES;
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0d1117] p-6 text-[var(--text-primary)] select-none">
+    <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[var(--canvas)] p-6 text-[var(--text-primary)] select-none">
       {/* Centered Termius-style Card Container */}
       <div className="w-full max-w-md space-y-6 animate-in fade-in zoom-in-95 duration-200">
         {/* Top Header: Badge, Host details, Show Logs Button */}
@@ -156,7 +156,7 @@ export function ConnectionProgress({
 
             {/* Host Name & Address */}
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold text-white">
+              <h2 className="truncate text-base font-semibold text-[var(--text-primary)]">
                 {host?.label || "Remote Server"}
               </h2>
               <p className="truncate font-mono text-xs text-[var(--text-muted)]">
@@ -169,7 +169,7 @@ export function ConnectionProgress({
           <button
             type="button"
             onClick={() => setShowLogs((prev) => !prev)}
-            className="rounded-xl border border-[var(--border)] bg-[#21262d] px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-[#30363d] shadow-sm cursor-pointer"
+            className="rounded-xl border border-[var(--border)] bg-[var(--surface-high)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-highest)] shadow-sm cursor-pointer"
           >
             {showLogs || isFailed ? "Hide logs" : "Show logs"}
           </button>
@@ -178,12 +178,12 @@ export function ConnectionProgress({
         {/* Process Tree: Horizontal Connecting Line & Stage Nodes (Termius-style) */}
         <div className="relative py-2">
           {/* Background Track */}
-          <div className="absolute left-4 right-4 top-5 h-[3px] rounded-full bg-[#21262d]" />
+          <div className="absolute left-4 right-4 top-5 h-[3px] rounded-full bg-[var(--surface-high)]" />
 
           {/* Active Progress Fill */}
           <div
             className={`absolute left-4 top-5 h-[3px] rounded-full transition-all duration-500 ${
-              isFailed ? "bg-[var(--danger)]" : "bg-[#38bdf8]"
+              isFailed ? "bg-[var(--danger)]" : "bg-[var(--secondary)]"
             }`}
             style={{ width: `calc(${progressPercent}% - 20px)` }}
           />
@@ -205,8 +205,8 @@ export function ConnectionProgress({
                         : isCompleted
                         ? "bg-[var(--primary)] text-black ring-4 ring-[var(--primary)]/20"
                         : isActive
-                        ? "bg-[#38bdf8] text-white ring-4 ring-[#38bdf8]/30 shadow-[#38bdf8]/30"
-                        : "bg-[#161b22] text-[var(--text-muted)] border border-[#30363d]"
+                        ? "bg-[var(--secondary)] text-white ring-4 ring-[var(--secondary)]/30 shadow-[var(--secondary)]/30"
+                        : "bg-[var(--surface-low)] text-[var(--text-muted)] border border-[var(--surface-highest)]"
                     }`}
                   >
                     {isCurrentFailed ? (
@@ -217,8 +217,8 @@ export function ConnectionProgress({
                       <>
                         <Loader2 size={16} className="animate-spin text-white" />
                         <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#38bdf8] opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#38bdf8]" />
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--secondary)] opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--secondary)]" />
                         </span>
                       </>
                     ) : (
@@ -228,7 +228,7 @@ export function ConnectionProgress({
                   <span
                     className={`text-[10px] font-mono mt-1.5 transition-colors ${
                       isActive
-                        ? "text-[#38bdf8] font-semibold"
+                        ? "text-[var(--secondary)] font-semibold"
                         : isCompleted
                         ? "text-[var(--text-primary)]"
                         : "text-[var(--text-muted)]"
@@ -243,9 +243,9 @@ export function ConnectionProgress({
         </div>
 
         {/* Current status line with animated indicator */}
-        <div className="flex items-center justify-center gap-2.5 min-h-[32px] px-3.5 py-1.5 rounded-xl bg-[#161b22]/70 border border-[#30363d]/60 text-center">
+        <div className="flex items-center justify-center gap-2.5 min-h-[32px] px-3.5 py-1.5 rounded-xl bg-[var(--surface-low)]/70 border border-[var(--surface-highest)]/60 text-center">
           {!isFailed ? (
-            <Loader2 size={13} className="animate-spin text-[#38bdf8] shrink-0" />
+            <Loader2 size={13} className="animate-spin text-[var(--secondary)] shrink-0" />
           ) : (
             <AlertCircle size={13} className="text-[var(--danger)] shrink-0" />
           )}
@@ -271,7 +271,7 @@ export function ConnectionProgress({
               </span>
               <button
                 onClick={handleCopyLog}
-                className="flex items-center gap-1 rounded bg-[#21262d] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] hover:text-white border border-[var(--border)] transition"
+                className="flex items-center gap-1 rounded bg-[var(--surface-high)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)] transition"
               >
                 {copied ? (
                   <>
@@ -285,7 +285,7 @@ export function ConnectionProgress({
               </button>
             </div>
 
-            <div className="max-h-48 overflow-y-auto rounded-xl border border-[var(--border)] bg-[#05070a] p-3 font-mono text-[11px] leading-relaxed shadow-inner">
+            <div className="max-h-48 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--canvas)] p-3 font-mono text-[11px] leading-relaxed shadow-inner">
               {logs.length === 0 ? (
                 <p className="text-[var(--text-muted)]">No logs yet...</p>
               ) : (
@@ -330,7 +330,7 @@ export function ConnectionProgress({
             {host && (
               <button
                 onClick={() => openEditModal(host)}
-                className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[#21262d] px-4 py-2 text-xs font-medium text-white transition hover:bg-[#30363d]"
+                className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-high)] px-4 py-2 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--surface-highest)]"
               >
                 <Pencil size={13} /> Edit Host
               </button>
@@ -341,7 +341,7 @@ export function ConnectionProgress({
                 if (activeTabId) closeSession(activeTabId);
                 onClose();
               }}
-              className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[#21262d] px-3.5 py-2 text-xs font-medium text-[var(--text-muted)] transition hover:text-white"
+              className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-high)] px-3.5 py-2 text-xs font-medium text-[var(--text-muted)] transition hover:text-[var(--text-primary)]"
             >
               <X size={13} /> Close
             </button>
