@@ -276,6 +276,9 @@ impl tokio::io::AsyncWrite for SshStream {
 pub enum SessionCommand {
     Data(Vec<u8>),
     Resize { cols: u32, rows: u32 },
+    /// Start writing the output to this recording (ends a running one).
+    Record(crate::recording::Recorder),
+    StopRecording,
 }
 
 /// Authenticates an SSH session using public key authentication, dynamically negotiating
@@ -511,6 +514,12 @@ pub struct SshSession {
     /// Possibly shared with other tabs, SFTP and tunnels to the same host.
     connection: Arc<SshConnection>,
     cmd_tx: mpsc::UnboundedSender<SessionCommand>,
+    /// "user@host", the title of recordings.
+    title: String,
+    /// Terminal size, for the header of a recording started later.
+    size: std::sync::Mutex<(u32, u32)>,
+    /// File name of the running recording.
+    recording: std::sync::Mutex<Option<String>>,
 }
 
 pub struct SessionManager {
@@ -543,6 +552,7 @@ impl SessionManager {
         cols: u16,
         rows: u16,
         command: Option<String>,
+        record: bool,
     ) -> Result<(), String> {
         // Prevent duplicate concurrent connection attempts for the exact same session_id
         {
@@ -564,7 +574,7 @@ impl SessionManager {
         self.sessions.write().await.remove(&session_id);
 
         let res = self
-            .do_connect(app, db, pool, session_id.clone(), host_id, route, cols, rows, command)
+            .do_connect(app, db, pool, session_id.clone(), host_id, route, cols, rows, command, record)
             .await;
 
         {
@@ -611,6 +621,7 @@ impl SessionManager {
         cols: u16,
         rows: u16,
         command: Option<String>,
+        record: bool,
     ) -> Result<(), String> {
         self.check_cancelled(&session_id).await?;
 
@@ -687,10 +698,22 @@ impl SessionManager {
 
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
 
+        let title = route.last().map(Hop::target).unwrap_or_default();
+        // Recording every session (Settings): from the very first output.
+        let mut recorder = None;
+        if record {
+            match crate::recording::Recorder::create(&crate::recording::recordings_dir(), &title, cols as u32, rows as u32) {
+                Ok(started) => recorder = Some(started),
+                Err(e) => emit_progress(5, "ready", &format!("Recording could not start: {e}"), false),
+            }
+        }
         let session = Arc::new(SshSession {
             id: session_id.clone(),
             connection,
             cmd_tx,
+            title,
+            size: std::sync::Mutex::new((cols as u32, rows as u32)),
+            recording: std::sync::Mutex::new(recorder.as_ref().map(|r| r.name.clone())),
         });
 
         {
@@ -717,6 +740,7 @@ impl SessionManager {
             let mut flush_deadline: Option<tokio::time::Instant> = None;
             let mut exit_status: Option<u32> = None;
             let mut shell_ended = false;
+            let mut recorder = recorder;
 
             loop {
                 let sleep = async {
@@ -730,6 +754,9 @@ impl SessionManager {
                     msg = channel.wait() => {
                         match msg {
                             Some(russh::ChannelMsg::Data { ref data }) => {
+                                if let Some(recorder) = recorder.as_mut() {
+                                    recorder.output(data);
+                                }
                                 match flush_deadline {
                                     None => {
                                         // Idle stream: emit interactive echo immediately (0ms delay)
@@ -746,6 +773,9 @@ impl SessionManager {
                                 }
                             }
                             Some(russh::ChannelMsg::ExtendedData { ref data, .. }) => {
+                                if let Some(recorder) = recorder.as_mut() {
+                                    recorder.output(data);
+                                }
                                 match flush_deadline {
                                     None => {
                                         let _ = app_for_output.emit(&event_name, data.to_vec());
@@ -796,6 +826,19 @@ impl SessionManager {
                                 // Safeguard: Ignore 0 or near-zero window sizes caused by hidden DOM elements
                                 if cols >= 15 && rows >= 4 {
                                     let _ = channel.window_change(cols, rows, 0, 0).await;
+                                    if let Some(recorder) = recorder.as_mut() {
+                                        recorder.resize(cols, rows);
+                                    }
+                                }
+                            }
+                            Some(SessionCommand::Record(started)) => {
+                                if let Some(previous) = recorder.replace(started) {
+                                    previous.finish();
+                                }
+                            }
+                            Some(SessionCommand::StopRecording) => {
+                                if let Some(finished) = recorder.take() {
+                                    finished.finish();
                                 }
                             }
                             // The tab was closed: end this shell. The connection
@@ -807,6 +850,9 @@ impl SessionManager {
                         }
                     }
                 }
+            }
+            if let Some(finished) = recorder.take() {
+                finished.finish();
             }
         });
 
@@ -827,6 +873,42 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Start recording a session's output; returns the recording's file name.
+    pub async fn start_recording(&self, session_id: &str) -> Result<String, String> {
+        let sessions = self.sessions.read().await;
+        let session = sessions.get(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let (cols, rows) = session.size.lock().map(|size| *size).unwrap_or((80, 24));
+        let recorder = crate::recording::Recorder::create(&crate::recording::recordings_dir(), &session.title, cols, rows)
+            .map_err(|e| format!("Could not start the recording: {e}"))?;
+        let name = recorder.name.clone();
+        session
+            .cmd_tx
+            .send(SessionCommand::Record(recorder))
+            .map_err(|_| "The session has ended".to_string())?;
+        if let Ok(mut recording) = session.recording.lock() {
+            *recording = Some(name.clone());
+        }
+        Ok(name)
+    }
+
+    pub async fn stop_recording(&self, session_id: &str) -> Result<(), String> {
+        let sessions = self.sessions.read().await;
+        if let Some(session) = sessions.get(session_id) {
+            let _ = session.cmd_tx.send(SessionCommand::StopRecording);
+            if let Ok(mut recording) = session.recording.lock() {
+                *recording = None;
+            }
+        }
+        Ok(())
+    }
+
+    /// The running recording's file name, if any.
+    pub async fn recording(&self, session_id: &str) -> Option<String> {
+        let sessions = self.sessions.read().await;
+        let recording = sessions.get(session_id)?.recording.lock().ok()?.clone();
+        recording
+    }
+
     pub async fn write(&self, session_id: &str, data: Vec<u8>) -> Result<(), String> {
         let sessions = self.sessions.read().await;
         let session = sessions
@@ -843,6 +925,11 @@ impl SessionManager {
         let session = sessions
             .get(session_id)
             .ok_or_else(|| "Session not found".to_string())?;
+        if cols >= 15 && rows >= 4 {
+            if let Ok(mut size) = session.size.lock() {
+                *size = (cols as u32, rows as u32);
+            }
+        }
         session
             .cmd_tx
             .send(SessionCommand::Resize {

@@ -931,6 +931,61 @@ pub async fn docker_logs(
     crate::hostinfo::docker::logs(&connection, &container_id, tail, sudo).await
 }
 
+// ================= SESSION RECORDINGS =================
+
+#[tauri::command]
+pub async fn ssh_recording_start(state: State<'_, AppState>, session_id: String) -> Result<String, String> {
+    state.ssh.start_recording(&session_id).await
+}
+
+#[tauri::command]
+pub async fn ssh_recording_stop(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    state.ssh.stop_recording(&session_id).await
+}
+
+#[tauri::command]
+pub async fn ssh_recording_status(state: State<'_, AppState>, session_id: String) -> Result<Option<String>, String> {
+    Ok(state.ssh.recording(&session_id).await)
+}
+
+#[tauri::command]
+pub async fn recording_list() -> Result<Vec<crate::recording::RecordingInfo>, String> {
+    run_blocking(|| Ok(crate::recording::list(&crate::recording::recordings_dir()))).await
+}
+
+/// A recording's contents, for the player.
+#[tauri::command]
+pub async fn recording_read(name: String) -> Result<String, String> {
+    run_blocking(move || {
+        let path = crate::recording::path_of(&crate::recording::recordings_dir(), &name)?;
+        let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+        if size > crate::recording::MAX_PLAYBACK_BYTES {
+            return Err("This recording is too large to play here; export it and use asciinema".to_string());
+        }
+        std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn recording_delete(name: String) -> Result<(), String> {
+    run_blocking(move || {
+        let path = crate::recording::path_of(&crate::recording::recordings_dir(), &name)?;
+        std::fs::remove_file(path).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Copy a recording to where the user picked in the save dialog.
+#[tauri::command]
+pub async fn recording_export(name: String, destination: String) -> Result<(), String> {
+    run_blocking(move || {
+        let path = crate::recording::path_of(&crate::recording::recordings_dir(), &name)?;
+        std::fs::copy(path, destination).map(|_| ()).map_err(|e| e.to_string())
+    })
+    .await
+}
+
 /// Settings: share one SSH connection per host (on by default).
 #[tauri::command]
 pub fn ssh_set_connection_sharing(state: State<AppState>, enabled: bool) {
@@ -938,6 +993,7 @@ pub fn ssh_set_connection_sharing(state: State<AppState>, enabled: bool) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn ssh_connect(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -946,6 +1002,7 @@ pub async fn ssh_connect(
     cols: u16,
     rows: u16,
     command: Option<String>,
+    record: Option<bool>,
 ) -> Result<(), String> {
     let host = state
         .db
@@ -967,6 +1024,7 @@ pub async fn ssh_connect(
             cols,
             rows,
             command.filter(|c| !c.trim().is_empty()),
+            record.unwrap_or(false),
         )
         .await;
 

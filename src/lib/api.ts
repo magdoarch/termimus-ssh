@@ -72,6 +72,18 @@ export interface DockerContainerStats {
 
 export type DockerAction = "start" | "stop" | "restart" | "pause" | "unpause" | "remove";
 
+/** A session recording (asciinema v2 .cast, see recording.rs) */
+export interface RecordingInfo {
+  name: string;
+  title: string;
+  /** Unix seconds */
+  startedAt: number;
+  durationSecs: number;
+  sizeBytes: number;
+  cols: number;
+  rows: number;
+}
+
 /** A current one-time code (see ssh::totp) */
 export interface TotpCode {
   code: string;
@@ -436,14 +448,16 @@ export const api = {
   deleteFolder: (id: string) => invoke<void>("folder_delete", { id }),
 
   // SSH Sessions
-  /** `command` runs instead of the login shell (still with a PTY) */
+  /** `command` runs instead of the login shell (still with a PTY); `record` starts a recording */
   connectSsh: (
     hostId: string,
     sessionId: string,
     cols: number,
     rows: number,
     command?: string,
-  ) => invoke<void>("ssh_connect", { hostId, sessionId, cols, rows, command: command ?? null }),
+    record?: boolean,
+  ) =>
+    invoke<void>("ssh_connect", { hostId, sessionId, cols, rows, command: command ?? null, record: record ?? false }),
   writeSsh: (sessionId: string, data: number[]) =>
     invoke<void>("ssh_write", { sessionId, data }),
   resizeSsh: (sessionId: string, cols: number, rows: number) =>
@@ -630,6 +644,16 @@ export const api = {
   startHostMonitor: (hostId: string, monitorId: string, intervalSecs = 3) =>
     invoke<void>("host_monitor_start", { hostId, monitorId, intervalSecs }),
   stopHostMonitor: (monitorId: string) => invoke<void>("host_monitor_stop", { monitorId }),
+
+  // Session recordings (output only, asciinema v2)
+  startRecording: (sessionId: string) => invoke<string>("ssh_recording_start", { sessionId }),
+  stopRecording: (sessionId: string) => invoke<void>("ssh_recording_stop", { sessionId }),
+  recordingStatus: (sessionId: string) => invoke<string | null>("ssh_recording_status", { sessionId }),
+  listRecordings: () => invoke<RecordingInfo[]>("recording_list"),
+  readRecording: (name: string) => invoke<string>("recording_read", { name }),
+  deleteRecording: (name: string) => invoke<void>("recording_delete", { name }),
+  exportRecording: (name: string, destination: string) =>
+    invoke<void>("recording_export", { name, destination }),
 
   /** Keep the host's SSH connection open while a panel is shown */
   holdHostConnection: (hostId: string, leaseId: string) =>

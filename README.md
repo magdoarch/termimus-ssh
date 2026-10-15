@@ -57,6 +57,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Session Geometry Protection**: Background tabs stay mounted without collapsing to 0×0 geometry, preventing remote `htop`, `vim`, and curses TUIs from corrupting due to bogus SIGWINCH events.
 - **Quick Connect**: Instant fuzzy-search launcher accessible anywhere with `Ctrl+K`.
 - **Resilient Sessions**: A dropped connection reconnects in the same tab with its scrollback intact; optionally reopen last time's tabs at startup.
+- **Session Recording**: Record SSH sessions as asciinema `.cast` files (output only, never keystrokes), replay them in-app with seek and speed controls, or export them.
 - **Safer Pasting & Links**: Ctrl+click opens URLs; text that would run line by line in the shell is shown before it's pasted.
 - **Light & Dark**: Dark, Light or follow-the-system app theme.
 

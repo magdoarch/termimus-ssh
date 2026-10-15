@@ -31,11 +31,14 @@ interface SettingsState {
   autoReconnect: boolean;
   /** Reopen the previous session's tabs at startup */
   restoreTabs: boolean;
+  /** Record every SSH terminal session (output only) */
+  recordSessions: boolean;
   setAppTheme: (v: AppTheme) => void;
   setShareConnections: (v: boolean) => void;
   setConfirmMultilinePaste: (v: boolean) => void;
   setAutoReconnect: (v: boolean) => void;
   setRestoreTabs: (v: boolean) => void;
+  setRecordSessions: (v: boolean) => void;
   setUseOsKeyring: (v: boolean) => void;
   setUseBiometrics: (v: boolean) => void;
   setAutoLockPolicy: (v: AutoLockPolicy) => void;
@@ -52,11 +55,13 @@ export const useSettingsStore = create<SettingsState>()(
       confirmMultilinePaste: true,
       autoReconnect: true,
       restoreTabs: false,
+      recordSessions: false,
       setAppTheme: (v) => set({ appTheme: v }),
       setShareConnections: (v) => set({ shareConnections: v }),
       setConfirmMultilinePaste: (v) => set({ confirmMultilinePaste: v }),
       setAutoReconnect: (v) => set({ autoReconnect: v }),
       setRestoreTabs: (v) => set({ restoreTabs: v }),
+      setRecordSessions: (v) => set({ recordSessions: v }),
       setUseOsKeyring: (v) => set({ useOsKeyring: v }),
       setUseBiometrics: (v) => set({ useBiometrics: v }),
       setAutoLockPolicy: (v) => set({ autoLockPolicy: v }),

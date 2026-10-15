@@ -18,6 +18,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
   - `sshconfig/` — `~/.ssh/config` + `known_hosts` parsing and the import.
   - `hostinfo/` — server stats and Docker over exec channels on the shared connection.
   - `remote/` — VNC (`vnc-rs`) and RDP (IronRDP) sessions.
+  - `recording.rs` — asciinema v2 session recordings.
   - `sftp/` — SFTP manager (`russh-sftp`) + local filesystem helpers.
   - `tunnel/` — local (`-L`), remote (`-R`) and dynamic SOCKS (`-D`) port forwarding.
   - `vault/` — AES-256-GCM encryption + Argon2id key derivation. Master password/derived key lives only in memory (`VaultManager`), never persisted.

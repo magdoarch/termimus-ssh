@@ -11,6 +11,7 @@ import { useSettingsStore } from "../../stores/useSettingsStore";
 import { usePasteConfirmStore } from "../../stores/usePasteConfirmStore";
 import { useHostPanelStore } from "../../stores/useHostPanelStore";
 import { useReconnectStore, type ReconnectStatus } from "../../stores/useReconnectStore";
+import { useRecordingStore } from "../../stores/useRecordingStore";
 import {
   Copy,
   Clipboard,
@@ -25,6 +26,8 @@ import {
   Search,
   Gauge,
   Container,
+  Circle,
+  Film,
 } from "lucide-react";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../stores/useSessionStore";
@@ -149,7 +152,9 @@ async function attemptReconnect(sessionId: string, hostId: string, attempt: numb
   }
   useReconnectStore.getState().set(sessionId, { ...status, at: Date.now() });
   try {
-    await api.connectSsh(hostId, sessionId, entry.lastSize.cols, entry.lastSize.rows, tab.command);
+    const record = useSettingsStore.getState().recordSessions;
+    await api.connectSsh(hostId, sessionId, entry.lastSize.cols, entry.lastSize.rows, tab.command, record);
+    if (record) syncRecordingState(sessionId);
     cancelReconnect(sessionId);
     entry.term.write("\r\n\x1b[32m[Reconnected]\x1b[0m\r\n");
     useSessionStore.getState().setSessionConnected(sessionId, true);
@@ -158,6 +163,14 @@ async function attemptReconnect(sessionId: string, hostId: string, attempt: numb
     if (!terminalPool.has(sessionId) || !useReconnectStore.getState().pending[sessionId]) return;
     scheduleReconnect(sessionId, hostId, attempt + 1, String(e));
   }
+}
+
+/** Show whether the backend is recording this session (REC badge). */
+function syncRecordingState(sessionId: string) {
+  api
+    .recordingStatus(sessionId)
+    .then((name) => useRecordingStore.getState().setActive(sessionId, name))
+    .catch(() => {});
 }
 
 /** Skip the wait (banner button, network back). */
@@ -482,6 +495,7 @@ function bindTerminalShortcuts(
  */
 export function disposeTerminalSession(sessionId: string) {
   cancelReconnect(sessionId);
+  useRecordingStore.getState().setActive(sessionId, null);
   const entry = terminalPool.get(sessionId);
   if (!entry) return;
 
@@ -537,6 +551,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
   const setConnected = useSessionStore((s) => s.setSessionConnected);
   const setError = useSessionStore((s) => s.setSessionError);
   const reconnectStatus = useReconnectStore((s) => s.pending[sessionId]);
+  const recordingName = useRecordingStore((s) => s.active[sessionId]);
   const closeSession = useSessionStore((s) => s.closeSession);
   const host = useHostStore((s) => s.hosts.find((h) => h.id === hostId));
   const tab = useSessionStore((s) => s.tabs.find((t) => t.id === sessionId));
@@ -681,9 +696,18 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
       setCurrentStep(1);
       setLogs([initialLog]);
 
+      const record = useSettingsStore.getState().recordSessions;
       api
-        .connectSsh(hostId, sessionId, cols, rows, useSessionStore.getState().tabs.find((t) => t.id === sessionId)?.command)
+        .connectSsh(
+          hostId,
+          sessionId,
+          cols,
+          rows,
+          useSessionStore.getState().tabs.find((t) => t.id === sessionId)?.command,
+          record
+        )
         .then(() => {
+          if (record) syncRecordingState(sessionId);
           const entry = terminalPool.get(sessionId);
           if (entry) {
             entry.hasConnected = true;
@@ -877,6 +901,8 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
         }).then(keepListener);
 
         listen<{ lost: boolean; exitStatus: number | null }>(`ssh-closed-${sessionId}`, (event) => {
+          // The backend has finished any recording of this session.
+          useRecordingStore.getState().setActive(sessionId, null);
           if (event.payload?.lost && useSettingsStore.getState().autoReconnect) {
             // The connection dropped: keep the tab and log in again.
             beginReconnect(sessionId, hostId);
@@ -1099,6 +1125,15 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
         backgroundColor: themeBg,
       }}
     >
+      {recordingName && (
+        <div
+          className="pointer-events-none absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full bg-[var(--danger)]/90 px-2 py-0.5 text-[10px] font-semibold text-white shadow"
+          title={`Recording to ${recordingName}`}
+        >
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> REC
+        </div>
+      )}
+
       {reconnectStatus && !isLocal && (
         <ReconnectBanner
           status={reconnectStatus}
@@ -1213,6 +1248,40 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
           {!isLocal && hostId && (
             <>
               <div className="my-1 h-[1px] bg-[var(--border)]" />
+              {/* Session recording (output only) */}
+              <button
+                onClick={async () => {
+                  setContextMenu(null);
+                  try {
+                    if (recordingName) {
+                      await api.stopRecording(sessionId);
+                      useRecordingStore.getState().setActive(sessionId, null);
+                      showCopyToast("Recording saved");
+                    } else {
+                      const name = await api.startRecording(sessionId);
+                      useRecordingStore.getState().setActive(sessionId, name);
+                    }
+                  } catch (e) {
+                    showCopyToast(String(e));
+                  }
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors"
+              >
+                <Circle size={13} className={recordingName ? "fill-current text-[var(--danger)]" : ""} />
+                <span>{recordingName ? "Stop Recording" : "Start Recording"}</span>
+              </button>
+              <button
+                onClick={() => {
+                  useRecordingStore.getState().open();
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors"
+              >
+                <Film size={13} />
+                <span>Session Recordings…</span>
+              </button>
+              <div className="my-1 h-[1px] bg-[var(--border)]" />
+
               {/* Server dashboard over this tab's connection */}
               <button
                 onClick={() => {
