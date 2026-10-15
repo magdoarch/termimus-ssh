@@ -57,6 +57,9 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Session Geometry Protection**: Background tabs stay mounted without collapsing to 0×0 geometry, preventing remote `htop`, `vim`, and curses TUIs from corrupting due to bogus SIGWINCH events.
 - **Quick Connect**: Instant fuzzy-search launcher accessible anywhere with `Ctrl+K`.
 
+### 🖼️ Remote Desktop
+- **VNC Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host.
+
 ### 🗂️ Workspaces & Multi-Server Cluster Launcher
 - **Multi-Server Layout Presets**: Design and save complex multi-terminal split layouts (Single, Vertical 2-way, Horizontal 2-way, 3-way, 4-way Grid, 6-way Matrix) with assigned hosts for each pane.
 - **1-Click Cluster Launcher**: Atomic multi-session launcher connects to all target machines simultaneously and arranges them into their pre-configured split panes with zero layout jitter.

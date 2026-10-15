@@ -14,6 +14,7 @@ import { useHostStore } from "../../stores/useHostStore";
 import { useTerminalThemeStore } from "../../stores/useTerminalThemeStore";
 import { getTerminalTheme } from "../../lib/terminalThemes";
 import { XtermView } from "./XtermView";
+import { RemoteDesktopView } from "../remote/RemoteDesktopView";
 import { DropZoneOverlay } from "./DropZoneOverlay";
 
 interface PaneViewProps {
@@ -375,8 +376,9 @@ export function PaneView({ pane, visible = true }: PaneViewProps) {
           if (!tab) return null;
           const isTabActive = tab.id === pane.activeTabId;
 
+          const View = tab.protocol === "vnc" ? RemoteDesktopView : XtermView;
           return (
-            <XtermView
+            <View
               key={tab.id}
               sessionId={tab.id}
               hostId={tab.hostId}

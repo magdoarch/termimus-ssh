@@ -115,6 +115,7 @@ export function QuickConnectModal({ isOpen, onClose, onConnect }: QuickConnectMo
       port,
       username,
       auth_method: "password",
+      protocol: "ssh",
       tags: ["quick"],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

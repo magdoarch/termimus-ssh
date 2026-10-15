@@ -10,10 +10,14 @@ import {
   Eye,
   EyeOff,
   Cpu,
+  Monitor,
+  Terminal as TerminalIcon,
+  ShieldAlert,
+  Unlock,
 } from "lucide-react";
 import { useHostStore } from "../../stores/useHostStore";
 import { useKeychainStore } from "../../stores/useKeychainStore";
-import { api, HostInput } from "../../lib/api";
+import { api, DEFAULT_PORTS, Host, HostInput, HostProtocol, VncOptions } from "../../lib/api";
 import { DistroBadge, DISTRO_OPTIONS } from "./DistroBadge";
 import { CustomSelect } from "../ui/CustomSelect";
 import { copyText } from "../../lib/clipboard";
@@ -31,7 +35,9 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
   const [address, setAddress] = useState("");
   const [port, setPort] = useState(22);
   const [username, setUsername] = useState("root");
-  const [authMethod, setAuthMethod] = useState<"password" | "private_key">("password");
+  const [protocol, setProtocol] = useState<HostProtocol>("ssh");
+  const [authMethod, setAuthMethod] = useState<"password" | "private_key" | "none">("password");
+  const [vncOptions, setVncOptions] = useState<VncOptions>({});
   const [secret, setSecret] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [folderId, setFolderId] = useState<string>("");
@@ -71,7 +77,8 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       setPort(editingHost.port);
       setUsername(editingHost.username);
       const isPrivateKey = editingHost.auth_method === "private_key";
-      setAuthMethod(isPrivateKey ? "private_key" : "password");
+      setAuthMethod(isPrivateKey ? "private_key" : editingHost.auth_method === "none" ? "none" : "password");
+      loadProtocolFields(editingHost);
       setTagInput(editingHost.tags.join(", "));
       setFolderId(editingHost.folder_id ?? "");
       setOsIcon(editingHost.os_icon ?? "");
@@ -85,7 +92,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       setSecret("");
 
       // Eagerly load saved password for existing hosts
-      if (!isPrivateKey) {
+      if (editingHost.auth_method === "password") {
         setPasswordLoading(true);
         api
           .getHostPassword(editingHost.id)
@@ -106,7 +113,8 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       setPort(templateHost.port);
       setUsername(templateHost.username);
       const isPrivateKey = templateHost.auth_method === "private_key";
-      setAuthMethod(isPrivateKey ? "private_key" : "password");
+      setAuthMethod(isPrivateKey ? "private_key" : templateHost.auth_method === "none" ? "none" : "password");
+      loadProtocolFields(templateHost);
       setTagInput(templateHost.tags.join(", "));
       setFolderId(templateHost.folder_id ?? defaultFolderId ?? "");
       setOsIcon(templateHost.os_icon ?? "");
@@ -123,9 +131,11 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       // ── CREATE NEW mode ───────────────────────────────────────────────────
       setLabel("");
       setAddress("");
-      setPort(22);
+      setPort(DEFAULT_PORTS.ssh);
       setUsername("root");
       setAuthMethod("password");
+      setProtocol("ssh");
+      setVncOptions({});
       setSelectedCredentialId("");
       setSecret("");
       setTagInput("");
@@ -135,6 +145,27 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
     }
     setError(null);
   }, [editingHost, templateHost, defaultFolderId, isHostModalOpen]);
+
+  function loadProtocolFields(host: Host) {
+    setProtocol(host.protocol ?? "ssh");
+    try {
+      setVncOptions(host.protocol === "vnc" && host.protocol_options ? JSON.parse(host.protocol_options) : {});
+    } catch {
+      setVncOptions({});
+    }
+  }
+
+  function handleProtocolChange(next: HostProtocol) {
+    if (next === protocol) return;
+    // Follow the default port unless the user typed a custom one.
+    if (port === DEFAULT_PORTS[protocol]) setPort(DEFAULT_PORTS[next]);
+    if (next === "vnc" && authMethod === "private_key") {
+      setAuthMethod("password");
+      setSelectedCredentialId("");
+    }
+    if (next === "ssh" && authMethod === "none") setAuthMethod("password");
+    setProtocol(next);
+  }
 
   // When a keychain item is selected, update default username if not set
   function handleSelectCredential(id: string) {
@@ -211,7 +242,8 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       setError("Address (IP or hostname) is required");
       return;
     }
-    if (!username.trim()) {
+    const isVnc = protocol === "vnc";
+    if (!isVnc && !username.trim()) {
       setError("Username is required");
       return;
     }
@@ -236,10 +268,10 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
       const input: HostInput = {
         label: label.trim() || address.trim(),
         address: address.trim(),
-        port: Number(port) || 22,
-        username: username.trim(),
+        port: Number(port) || DEFAULT_PORTS[protocol],
+        username: isVnc ? "" : username.trim(),
         auth_method: authMethod,
-        credential_id: credentialIdToSave,
+        credential_id: authMethod === "none" ? null : credentialIdToSave,
         secret:
           authMethod === "password"
             ? selectedCredentialId
@@ -253,6 +285,8 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
         folder_id: folderId || null,
         os_icon: osIcon || null,
         jump_host_id: jumpHostId || null,
+        protocol,
+        protocol_options: isVnc ? JSON.stringify(vncOptions) : null,
       };
 
       await saveHost(input, editingHost?.id);
@@ -303,6 +337,29 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
               <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                 General & Connection
               </h3>
+
+              <div>
+                <label className="mb-1.5 block font-medium text-[var(--text-muted)]">Protocol</label>
+                <div className="flex gap-2">
+                  {([
+                    { value: "ssh", label: "SSH Terminal", icon: TerminalIcon },
+                    { value: "vnc", label: "VNC Remote Desktop", icon: Monitor },
+                  ] as const).map(({ value, label: optionLabel, icon: Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => handleProtocolChange(value)}
+                      className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
+                        protocol === value
+                          ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-sm"
+                          : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-white hover:bg-[var(--surface-high)]"
+                      }`}
+                    >
+                      <Icon size={13} /> {optionLabel}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               <div>
                 <label className="mb-1.5 block font-medium text-[var(--text-muted)]">
@@ -358,19 +415,21 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                 </div>
               </div>
 
+              {protocol === "ssh" && (
               <div>
                 <label className="mb-1.5 block font-medium text-[var(--text-muted)]">
                   Username *
                 </label>
                 <input
                   type="text"
-                  required
+                  required={protocol === "ssh"}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="e.g. root or ubuntu"
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-3 py-2 text-sm font-mono text-[var(--text-primary)] focus:border-[var(--primary)] focus:outline-none transition-colors"
                 />
               </div>
+              )}
 
               <div>
                 <label className="mb-1.5 block font-medium text-[var(--text-muted)]">
@@ -397,7 +456,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   options={[
                     { value: "", label: "Direct Connection (No Jump Host)" },
                     ...hosts
-                      .filter((h) => h.id !== editingHost?.id)
+                      .filter((h) => h.id !== editingHost?.id && h.protocol !== "vnc")
                       .map((h) => ({
                         value: h.id,
                         label: h.label,
@@ -408,7 +467,40 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                 <p className="mt-1 text-[11px] text-[var(--text-muted)] leading-relaxed">
                   Traffic to this host will be securely tunneled through the selected Bastion server.
                 </p>
+                {protocol === "vnc" && !jumpHostId && (
+                  <div className="mt-2 flex items-start gap-2 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2.5 py-2 text-[11px] text-[var(--warning)]">
+                    <ShieldAlert size={13} className="shrink-0 mt-0.5" />
+                    <span>
+                      VNC traffic (including what you type) is not encrypted. Pick a Jump Host to
+                      tunnel it over SSH, or only use this on a trusted network.
+                    </span>
+                  </div>
+                )}
               </div>
+
+              {protocol === "vnc" && (
+                <div className="space-y-2">
+                  <label className="block font-medium text-[var(--text-muted)]">VNC Options</label>
+                  <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(vncOptions.viewOnly)}
+                      onChange={(e) => setVncOptions({ ...vncOptions, viewOnly: e.target.checked })}
+                      className="accent-[var(--primary)]"
+                    />
+                    View only (don't send keyboard, mouse or clipboard)
+                  </label>
+                  <label className="flex items-center gap-2 text-[var(--text-secondary)]">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(vncOptions.exclusive)}
+                      onChange={(e) => setVncOptions({ ...vncOptions, exclusive: e.target.checked })}
+                      className="accent-[var(--primary)]"
+                    />
+                    Exclusive session (ask the server to disconnect other viewers)
+                  </label>
+                </div>
+              )}
             </div>
 
             {/* RIGHT COLUMN: AUTHENTICATION */}
@@ -436,6 +528,22 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   >
                     <Lock size={13} /> Password
                   </button>
+                  {protocol === "vnc" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMethod("none");
+                      setSelectedCredentialId("");
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
+                      authMethod === "none"
+                        ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-sm"
+                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-white hover:bg-[var(--surface-high)]"
+                    }`}
+                  >
+                    <Unlock size={13} /> No Password
+                  </button>
+                  ) : (
                   <button
                     type="button"
                     onClick={() => {
@@ -450,10 +558,16 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   >
                     <Key size={13} /> Key PEM
                   </button>
+                  )}
                 </div>
               </div>
 
-              {authMethod === "password" ? (
+              {authMethod === "none" ? (
+                <p className="pt-1 text-[11px] text-[var(--text-muted)] leading-relaxed">
+                  For VNC servers configured without authentication. Anyone who can reach the
+                  server can see and control the desktop.
+                </p>
+              ) : authMethod === "password" ? (
                 <div className="space-y-3 pt-1">
                   {/* Keychain Identity Selector */}
                   {availableIdentities.length > 0 && (
@@ -496,7 +610,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                             setShowPassword(true);
                           }}
                           disabled={passwordLoading}
-                          placeholder={passwordLoading ? "Loading..." : "Server password..."}
+                          placeholder={passwordLoading ? "Loading..." : protocol === "vnc" ? "VNC password..." : "Server password..."}
                           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-3 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/50 focus:border-[var(--primary)] focus:outline-none transition-colors disabled:opacity-60"
                         />
                         <button

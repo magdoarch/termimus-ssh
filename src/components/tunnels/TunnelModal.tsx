@@ -125,7 +125,7 @@ export function TunnelModal() {
               placeholder="Select SSH server..."
               options={[
                 { value: "", label: "Select SSH server..." },
-                ...hosts.map((h) => ({
+                ...hosts.filter((h) => h.protocol !== "vnc").map((h) => ({
                   value: h.id,
                   label: h.label,
                   description: `(${h.username}@${h.address}:${h.port})`,
