@@ -1705,6 +1705,7 @@ pub async fn sync_pull(
     server_url: String,
     auth_token: Option<String>,
     sync_password: String,
+    replace_all: Option<bool>,
 ) -> Result<ImportSummary, String> {
     let base = server_url.trim_end_matches('/');
     let client = sync_http_client()?;
@@ -1738,7 +1739,56 @@ pub async fn sync_pull(
         return Err("Sync Passphrase is required to decrypt the incoming sync bundle.".to_string());
     }
 
-    backup_import(state, encrypted_blob, false, Some(password.to_string()))
+    backup_import(
+        state,
+        encrypted_blob,
+        replace_all.unwrap_or(false),
+        Some(password.to_string()),
+    )
+}
+
+// ── Sync secrets ────────────────────────────────────────────────────────────
+// The relay auth token and the E2EE sync passphrase live in the OS keyring,
+// never in webview localStorage (which is plaintext on disk).
+const KEYRING_SYNC_USER: &str = "sync-secrets";
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncSecrets {
+    pub auth_token: String,
+    pub sync_password: String,
+}
+
+/// Store the sync secrets in the OS keyring. Empty secrets delete the entry.
+#[tauri::command]
+pub fn sync_secrets_save(auth_token: String, sync_password: String) -> Result<(), String> {
+    let entry = KeyringEntry::new(KEYRING_SERVICE, KEYRING_SYNC_USER)
+        .map_err(|e| format!("Keyring init failed: {e}"))?;
+    if auth_token.is_empty() && sync_password.is_empty() {
+        return match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("Failed to clear sync secrets from OS keyring: {e}")),
+        };
+    }
+    let json = serde_json::to_string(&SyncSecrets { auth_token, sync_password })
+        .map_err(|e| e.to_string())?;
+    entry
+        .set_password(&json)
+        .map_err(|e| format!("Failed to save sync secrets to OS keyring: {e}"))
+}
+
+/// Load the sync secrets from the OS keyring (`None` if nothing is stored).
+#[tauri::command]
+pub fn sync_secrets_load() -> Result<Option<SyncSecrets>, String> {
+    let entry = KeyringEntry::new(KEYRING_SERVICE, KEYRING_SYNC_USER)
+        .map_err(|e| format!("Keyring init failed: {e}"))?;
+    match entry.get_password() {
+        Ok(json) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|_| "Sync secrets in OS keyring are corrupted".to_string()),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Keyring read failed: {e}")),
+    }
 }
 
 /// Lists devices that have pushed revisions to the relay.

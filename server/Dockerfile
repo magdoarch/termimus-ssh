@@ -25,8 +25,8 @@ COPY --from=builder /bin/termimus-server /app/termimus-server
 
 ENV PORT=8080 \
     DATA_DIR=/data \
-    DB_PATH=/data/sync.db \
-    TERMIMUS_AUTH_TOKEN=""
+    DB_PATH=/data/sync.db
+# TERMIMUS_AUTH_TOKEN is required at runtime (e.g. -e TERMIMUS_AUTH_TOKEN=$(openssl rand -hex 32))
 
 EXPOSE 8080
 

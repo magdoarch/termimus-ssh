@@ -17,6 +17,8 @@ import (
 	"github.com/termimus/termimus-server/internal/middleware"
 )
 
+const minRecommendedTokenLen = 32
+
 func main() {
 	log.Println("─────────────────────────────────────────────────────────────")
 	log.Println("  Termimus Sync Server (Zero-Knowledge Self-Hosted Relay)   ")
@@ -39,9 +41,16 @@ func main() {
 	h := handlers.New(cfg, database, eventHub)
 	auth := middleware.NewAuth(cfg.AuthToken)
 
-	if cfg.AuthToken == "" {
-		log.Println("[Security Warning] TERMIMUS_AUTH_TOKEN is not set! Running in OPEN mode.")
-	} else {
+	switch {
+	case cfg.AuthToken == "" && !cfg.AllowOpenMode:
+		log.Fatal("Fatal: TERMIMUS_AUTH_TOKEN is not set. Generate one with `openssl rand -hex 32`. " +
+			"(For local testing only, set TERMIMUS_ALLOW_OPEN_MODE=1 to run without authentication.)")
+	case cfg.AuthToken == "":
+		log.Println("[Security Warning] TERMIMUS_ALLOW_OPEN_MODE=1: running WITHOUT authentication. Anyone who can reach this port can overwrite your sync data.")
+	default:
+		if len(cfg.AuthToken) < minRecommendedTokenLen {
+			log.Printf("[Security Warning] TERMIMUS_AUTH_TOKEN is shorter than %d characters; use a long random token (e.g. `openssl rand -hex 32`).", minRecommendedTokenLen)
+		}
 		log.Println("[Security] Bearer token authentication is enabled.")
 	}
 
@@ -66,8 +75,9 @@ func main() {
 	mux.HandleFunc("/api/v1/sync/devices", auth.Wrap(h.GetDevices))
 	mux.HandleFunc("/api/v1/sync/ws", auth.Wrap(h.WebSocket))
 
-	// Apply CORS
-	handler := middleware.CORS(mux)
+	// No CORS headers on purpose: the desktop client talks to the relay through
+	// native Rust HTTP, so browsers (i.e. arbitrary web pages) never need access.
+	handler := mux
 
 	// 5. Start HTTP Server with Graceful Shutdown
 	addr := fmt.Sprintf(":%s", cfg.Port)

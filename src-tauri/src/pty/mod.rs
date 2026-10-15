@@ -77,9 +77,15 @@ impl PtyManager {
         let cols = cols.max(10);
         let rows = rows.max(3);
 
-        let shell = shell_path
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(Self::detect_default_shell);
+        let shell = match shell_path.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            Some(requested) => {
+                if !is_allowed_shell(&requested) {
+                    return Err(format!("Shell is not an allowed login shell: {requested}"));
+                }
+                requested
+            }
+            None => Self::detect_default_shell(),
+        };
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -306,9 +312,41 @@ fn which_executable(name: &str) -> bool {
     false
 }
 
+/// The webview can request a specific shell, so restrict it to real shells
+/// instead of letting any script launch an arbitrary binary.
+#[cfg(not(target_os = "windows"))]
+fn is_allowed_shell(shell: &str) -> bool {
+    if shell == PtyManager::detect_default_shell() {
+        return true;
+    }
+    std::fs::read_to_string("/etc/shells")
+        .map(|list| {
+            list.lines()
+                .map(str::trim)
+                .any(|line| !line.starts_with('#') && line == shell)
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn is_allowed_shell(shell: &str) -> bool {
+    let name = std::path::Path::new(shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_ascii_lowercase())
+        .unwrap_or_default();
+    matches!(name.as_str(), "pwsh.exe" | "powershell.exe" | "cmd.exe" | "bash.exe" | "wsl.exe")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_allowed_shell() {
+        assert!(is_allowed_shell(&PtyManager::detect_default_shell()));
+        assert!(!is_allowed_shell("/tmp/not-a-shell"));
+    }
 
     #[test]
     fn test_detect_default_shell() {

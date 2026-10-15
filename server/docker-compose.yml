@@ -14,7 +14,9 @@ services:
       - PORT=8080
       - DATA_DIR=/data
       - DB_PATH=/data/sync.db
-      - TERMIMUS_AUTH_TOKEN=change-this-to-a-secure-random-token
+      # Required. Put it in a .env file next to this compose file, e.g.:
+      #   echo "TERMIMUS_AUTH_TOKEN=$(openssl rand -hex 32)" > .env
+      - TERMIMUS_AUTH_TOKEN=${TERMIMUS_AUTH_TOKEN:?Set TERMIMUS_AUTH_TOKEN (e.g. openssl rand -hex 32)}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
       interval: 30s

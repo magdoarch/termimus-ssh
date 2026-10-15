@@ -27,6 +27,11 @@ const joinPath = (dir: string, name: string) => `${dir.replace(/\/+$/, "")}/${na
 
 const baseName = (path: string) => path.split("/").filter(Boolean).pop() ?? "";
 
+/** A listed entry name must be a single path component, or joining it onto the
+ *  destination could escape the target dir (e.g. a hostile server's "../x"). */
+const isSafeEntryName = (name: string) =>
+  name !== "" && name !== "." && name !== ".." && !/[/\\\0]/.test(name);
+
 /**
  * Walk the selected roots and produce a flat, ordered transfer plan.
  * Upload scans the local tree; download scans the remote tree.
@@ -64,6 +69,10 @@ async function buildTransferPlan(
       return;
     }
     for (const child of children) {
+      if (!isSafeEntryName(child.name)) {
+        scanErrors.push(`${entry.path}: skipped entry with unsafe name ${JSON.stringify(child.name)}`);
+        continue;
+      }
       if (child.is_dir) {
         await walkDir(child, dest, depth + 1);
       } else {

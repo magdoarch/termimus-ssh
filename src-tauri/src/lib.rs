@@ -110,6 +110,8 @@ pub fn run() {
             commands::sync_push,
             commands::sync_pull,
             commands::sync_get_devices,
+            commands::sync_secrets_save,
+            commands::sync_secrets_load,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")
