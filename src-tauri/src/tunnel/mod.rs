@@ -1,5 +1,4 @@
-use russh::client::{self, Handle};
-use russh::keys::decode_secret_key;
+use russh::client::Handle;
 use russh::ChannelMsg;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::db::Database;
-use crate::ssh::{SshAuth, SshClientHandler};
+use crate::ssh::{JumpHostConfig, SshAuth, SshClientHandler};
 
 pub struct ActiveTunnel {
     pub rule_id: String,
@@ -51,6 +50,7 @@ impl TunnelManager {
         local_port: u16,
         remote_address: String,
         remote_port: u16,
+        jump_host: Option<JumpHostConfig>,
     ) -> Result<(), String> {
         {
             let active = self.active.lock().await;
@@ -59,38 +59,16 @@ impl TunnelManager {
             }
         }
 
-        let config = crate::ssh::default_client_config();
-        let handler = SshClientHandler {
-            address: address.clone(),
-            port,
+        let (handle, jump_handle) = crate::ssh::connect_authenticated(
             db,
-        };
-        let socket = match tokio::net::TcpStream::connect((address.as_str(), port)).await {
-            Ok(s) => {
-                crate::ssh::configure_tcp_stream(&s);
-                s
-            }
-            Err(e) => return Err(format!("Tunnel TCP connection failed: {e}")),
-        };
-        let mut handle = client::connect_stream(config, socket, handler)
-            .await
-            .map_err(|e| format!("Tunnel SSH connection failed: {e}"))?;
-
-        let authenticated = match auth {
-            SshAuth::Password(password) => handle
-                .authenticate_password(&username, &password)
-                .await
-                .map_err(|e| format!("Auth error: {e}"))?,
-            SshAuth::PrivateKey { pem, passphrase } => {
-                let key_pair = decode_secret_key(&pem, passphrase.as_deref())
-                    .map_err(|e| format!("Invalid private key: {e}"))?;
-                crate::ssh::authenticate_publickey_smart(&mut handle, &username, key_pair).await?
-            }
-        };
-
-        if !authenticated.success() {
-            return Err("Authentication rejected by server".to_string());
-        }
+            &address,
+            port,
+            &username,
+            &auth,
+            jump_host.as_ref(),
+        )
+        .await
+        .map_err(|e| format!("Tunnel: {e}"))?;
 
         let bind_addr = format!("{local_address}:{local_port}");
         let listener = TcpListener::bind(&bind_addr)
@@ -104,6 +82,9 @@ impl TunnelManager {
         let rule_id_for_task = rule_id.clone();
 
         tokio::spawn(async move {
+            // The bastion connection carries the tunnel's SSH session; keep it
+            // alive for as long as the listener runs.
+            let _jump_handle = jump_handle;
             let _ = app_for_status.emit(&status_event, "started");
             loop {
                 tokio::select! {

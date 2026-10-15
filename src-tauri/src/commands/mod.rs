@@ -552,6 +552,28 @@ fn resolve_host_auth(state: &AppState, host: &Host) -> Result<SshAuth, String> {
     }
 }
 
+/// Resolve the host's bastion (if any) into a `JumpHostConfig`. Every
+/// SSH-family connection (terminal, SFTP, tunnel) must use this so a host
+/// behind a jump host is never dialed directly on whatever network the user
+/// happens to be on.
+fn resolve_jump_host(state: &AppState, host: &Host) -> Result<Option<crate::ssh::JumpHostConfig>, String> {
+    let Some(ref jid) = host.jump_host_id else {
+        return Ok(None);
+    };
+    let jump = state
+        .db
+        .get_host(jid)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Jump Host / Bastion server not found".to_string())?;
+    let jump_auth = resolve_host_auth(state, &jump)?;
+    Ok(Some(crate::ssh::JumpHostConfig {
+        address: jump.address,
+        port: jump.port,
+        username: jump.username,
+        auth: jump_auth,
+    }))
+}
+
 #[tauri::command]
 pub async fn ssh_connect(
     app: AppHandle,
@@ -569,22 +591,7 @@ pub async fn ssh_connect(
 
     let auth = resolve_host_auth(&state, &host)?;
 
-    let jump_host = if let Some(ref jid) = host.jump_host_id {
-        let jump = state
-            .db
-            .get_host(jid)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Jump Host / Bastion server not found".to_string())?;
-        let jump_auth = resolve_host_auth(&state, &jump)?;
-        Some(crate::ssh::JumpHostConfig {
-            address: jump.address,
-            port: jump.port,
-            username: jump.username,
-            auth: jump_auth,
-        })
-    } else {
-        None
-    };
+    let jump_host = resolve_jump_host(&state, &host)?;
 
     let result = state
         .ssh
@@ -972,6 +979,7 @@ pub async fn sftp_connect(
         .ok_or_else(|| "Host not found".to_string())?;
 
     let auth = resolve_host_auth(&state, &host)?;
+    let jump_host = resolve_jump_host(&state, &host)?;
 
     state
         .sftp
@@ -983,6 +991,7 @@ pub async fn sftp_connect(
             host.port,
             host.username,
             auth,
+            jump_host,
         )
         .await
 }
@@ -1189,6 +1198,7 @@ pub async fn tunnel_start(
         .ok_or_else(|| "Target host not found".to_string())?;
 
     let auth = resolve_host_auth(&state, &host)?;
+    let jump_host = resolve_jump_host(&state, &host)?;
 
     state
         .tunnel
@@ -1204,6 +1214,7 @@ pub async fn tunnel_start(
             rule.local_port,
             rule.remote_address,
             rule.remote_port,
+            jump_host,
         )
         .await
 }

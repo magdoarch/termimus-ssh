@@ -1,5 +1,4 @@
-use russh::client::{self, Handle};
-use russh::keys::decode_secret_key;
+use russh::client::Handle;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 use crate::db::Database;
-use crate::ssh::{SshAuth, SshClientHandler};
+use crate::ssh::{JumpHostConfig, SshAuth, SshClientHandler};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -28,8 +27,9 @@ pub struct SftpConnection {
     pub session_id: String,
     pub host_id: String,
     pub sftp: SftpSession,
-    // Keep the russh handle alive so the connection stays open
+    // Keep the russh handles alive so the connection stays open
     _handle: Handle<SshClientHandler>,
+    _jump_handle: Option<Handle<SshClientHandler>>,
 }
 
 pub struct SftpManager {
@@ -63,39 +63,18 @@ impl SftpManager {
         port: u16,
         username: String,
         auth: SshAuth,
+        jump_host: Option<JumpHostConfig>,
     ) -> Result<String, String> {
-        let config = crate::ssh::default_client_config();
-        let handler = SshClientHandler {
-            address: address.clone(),
-            port,
+        let (handle, jump_handle) = crate::ssh::connect_authenticated(
             db,
-        };
-        let socket = match tokio::net::TcpStream::connect((address.as_str(), port)).await {
-            Ok(s) => {
-                crate::ssh::configure_tcp_stream(&s);
-                s
-            }
-            Err(e) => return Err(format!("SFTP TCP connection failed: {e}")),
-        };
-        let mut handle = client::connect_stream(config, socket, handler)
-            .await
-            .map_err(|e| format!("SFTP SSH connection failed: {e}"))?;
-
-        let authenticated = match auth {
-            SshAuth::Password(password) => handle
-                .authenticate_password(&username, &password)
-                .await
-                .map_err(|e| format!("Auth error: {e}"))?,
-            SshAuth::PrivateKey { pem, passphrase } => {
-                let key_pair = decode_secret_key(&pem, passphrase.as_deref())
-                    .map_err(|e| format!("Invalid private key: {e}"))?;
-                crate::ssh::authenticate_publickey_smart(&mut handle, &username, key_pair).await?
-            }
-        };
-
-        if !authenticated.success() {
-            return Err("Authentication rejected by server".to_string());
-        }
+            &address,
+            port,
+            &username,
+            &auth,
+            jump_host.as_ref(),
+        )
+        .await
+        .map_err(|e| format!("SFTP: {e}"))?;
 
         let channel = handle
             .channel_open_session()
@@ -121,6 +100,7 @@ impl SftpManager {
             host_id,
             sftp,
             _handle: handle,
+            _jump_handle: jump_handle,
         });
 
         let mut connections = self.connections.lock().await;

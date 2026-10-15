@@ -175,8 +175,18 @@ export function splitLeafNode(
   direction: SplitDirection,
   side: "first" | "second" = "second"
 ): PaneNode {
+  // Splitting a pane's only tab off itself would empty (and prune) that pane,
+  // leaving nowhere to split — the tab would vanish or end up in two panes.
+  const target = findPaneById(root, targetPaneId);
+  if (!target || (target.tabIds.length === 1 && target.tabIds[0] === newTabId)) {
+    return root;
+  }
+
   // 1. Remove newTabId from anywhere else in the tree first
-  const cleanedRoot = removeTabFromTree(root, newTabId) || root;
+  const cleanedRoot = removeTabFromTree(root, newTabId);
+  if (!cleanedRoot || !findPaneById(cleanedRoot, targetPaneId)) {
+    return root;
+  }
 
   // 2. Helper to replace the target leaf with a new split node
   function replaceInTree(node: PaneNode): PaneNode {
