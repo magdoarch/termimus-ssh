@@ -1,11 +1,11 @@
 //! SSH port forwarding: local (`ssh -L`), remote (`ssh -R`) and dynamic SOCKS
-//! (`ssh -D`). Each running rule owns one SSH connection, made through the
-//! host's jump host when one is configured.
+//! (`ssh -D`). Rules run on the host's shared SSH connection (see
+//! `ssh::conn`), through its jump hosts when it has any.
 
 mod socks;
 
-use russh::client::{Handle, Msg};
-use russh::{Channel, ChannelMsg, ChannelOpenFailure, Disconnect};
+use russh::client::Msg;
+use russh::{Channel, ChannelMsg, ChannelOpenFailure};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
@@ -19,7 +19,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::db::models::PortForwardRule;
 use crate::db::Database;
-use crate::ssh::{ForwardedTcpip, JumpHostConfig, SshAuth, SshClientHandler};
+use crate::ssh::{ConnectionPool, ForwardedTcpip, Route, SshConnection};
 
 /// How often a running tunnel checks whether its SSH connection is gone.
 const CONNECTION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
@@ -122,15 +122,6 @@ impl TunnelSpec {
     }
 }
 
-/// The SSH server a tunnel runs through.
-pub struct SshTarget {
-    pub address: String,
-    pub port: u16,
-    pub username: String,
-    pub auth: SshAuth,
-    pub jump: Option<JumpHostConfig>,
-}
-
 /// Emitted when a tunnel starts and when it stops (by request or on its own).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,8 +184,9 @@ impl TunnelManager {
     pub async fn start(
         &self,
         db: Arc<Database>,
+        pool: &ConnectionPool,
         rule_id: String,
-        ssh: SshTarget,
+        route: Route,
         spec: TunnelSpec,
         status: StatusSink,
     ) -> Result<(), String> {
@@ -211,14 +203,13 @@ impl TunnelManager {
             active.insert(rule_id.clone(), ActiveTunnel { generation, stop_tx: None });
         }
 
-        let (handle, jump_handle, intake) = match setup(db, &ssh, &spec).await {
+        let (connection, intake) = match setup(&db, pool, &route, &spec).await {
             Ok(v) => v,
             Err(e) => {
                 remove_if_current(&self.active, &rule_id, generation).await;
                 return Err(e);
             }
         };
-        let handle = Arc::new(handle);
 
         // Publish the stop handle before the task can possibly finish and
         // remove the entry. If the rule was stopped while connecting, bail out.
@@ -231,7 +222,7 @@ impl TunnelManager {
             _ => false,
         };
         if !published {
-            disconnect_quietly(&handle, jump_handle.as_ref()).await;
+            release(&connection, intake, &spec).await;
             return Err("Tunnel was stopped while connecting".to_string());
         }
 
@@ -242,13 +233,13 @@ impl TunnelManager {
                 state: "started",
                 error: None,
             });
-            let error = serve(&handle, jump_handle.as_ref(), intake, &spec, stop_rx).await;
+            let error = serve(&connection, intake, &spec, stop_rx).await;
             if let Some(e) = &error {
                 eprintln!("Tunnel {rule_id} stopped: {e}");
             }
-            // Whatever ended it, tear the connection down and forget the rule
-            // so it can be started again.
-            disconnect_quietly(&handle, jump_handle.as_ref()).await;
+            // Whatever ended it, forget the rule so it can be started again.
+            // The connection closes once nothing else uses it.
+            drop(connection);
             remove_if_current(&active, &rule_id, generation).await;
             status(TunnelStatus {
                 rule_id,
@@ -272,30 +263,19 @@ impl TunnelManager {
     }
 }
 
-/// Connect and start listening (locally, or on the server for `-R`).
+/// Connect (or reuse the host's connection) and start listening, locally or
+/// on the server for `-R`.
 async fn setup(
-    db: Arc<Database>,
-    ssh: &SshTarget,
+    db: &Arc<Database>,
+    pool: &ConnectionPool,
+    route: &Route,
     spec: &TunnelSpec,
-) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>, Intake), String> {
-    let (forwarded_tx, forwarded_rx) = match spec {
-        TunnelSpec::Remote { .. } => {
-            let (tx, rx) = mpsc::unbounded_channel();
-            (Some(tx), Some(rx))
-        }
-        _ => (None, None),
-    };
-    let (mut handle, jump_handle) = crate::ssh::connect_authenticated_with_forwarding(
-        db,
-        &ssh.address,
-        ssh.port,
-        &ssh.username,
-        &ssh.auth,
-        ssh.jump.as_ref(),
-        forwarded_tx,
-    )
-    .await
-    .map_err(|e| format!("Tunnel: {e}"))?;
+) -> Result<(Arc<SshConnection>, Intake), String> {
+    let no_progress = |_: u8, _: &str, _: &str| {};
+    let (connection, _) = pool
+        .connect(db, route, &no_progress)
+        .await
+        .map_err(|e| format!("Tunnel: {e}"))?;
 
     let intake = match spec {
         TunnelSpec::Local { listen, .. } | TunnelSpec::Dynamic { listen } => {
@@ -304,12 +284,8 @@ async fn setup(
                 .map(Intake::Listener)
                 .map_err(|e| format!("Failed to listen on {listen}: {e}"))
         }
-        TunnelSpec::Remote { listen, .. } => match handle.tcpip_forward(listen.host.clone(), listen.port as u32).await {
-            // The reply only carries a port when the server picked one.
-            Ok(port) => Ok(Intake::Remote {
-                forwarded: forwarded_rx.expect("created for remote forwards"),
-                bound_port: if port == 0 { listen.port as u32 } else { port },
-            }),
+        TunnelSpec::Remote { listen, .. } => match connection.tcpip_forward(&listen.host, listen.port).await {
+            Ok((bound_port, forwarded)) => Ok(Intake::Remote { forwarded, bound_port }),
             Err(russh::Error::RequestDenied) => Err(format!(
                 "The SSH server refused to listen on {listen}: the port may already be in use on the server, \
                  or remote forwarding is disabled (AllowTcpForwarding in sshd_config). Binding to a \
@@ -317,27 +293,27 @@ async fn setup(
             )),
             Err(e) => Err(format!("Remote forward request failed: {e}")),
         },
-    };
-    match intake {
-        Ok(intake) => Ok((handle, jump_handle, intake)),
-        Err(e) => {
-            disconnect_quietly(&handle, jump_handle.as_ref()).await;
-            Err(e)
-        }
+    }?;
+    Ok((connection, intake))
+}
+
+/// Undo `setup` for a tunnel that never served.
+async fn release(connection: &SshConnection, intake: Intake, spec: &TunnelSpec) {
+    if let (Intake::Remote { bound_port, .. }, TunnelSpec::Remote { listen, .. }) = (intake, spec) {
+        let _ = tokio::time::timeout(CANCEL_FORWARD_TIMEOUT, connection.cancel_tcpip_forward(&listen.host, bound_port)).await;
     }
 }
 
 /// Accept connections until stopped. Returns why the tunnel ended on its own
 /// (`None` when stopped by the user).
 async fn serve(
-    handle: &Arc<Handle<SshClientHandler>>,
-    jump_handle: Option<&Handle<SshClientHandler>>,
+    connection: &Arc<SshConnection>,
     intake: Intake,
     spec: &TunnelSpec,
     mut stop_rx: oneshot::Receiver<()>,
 ) -> Option<String> {
     let mut connection_check = tokio::time::interval(CONNECTION_CHECK_INTERVAL);
-    let connection_lost = || handle.is_closed() || jump_handle.is_some_and(|j| j.is_closed());
+    let connection_lost = || connection.is_closed();
 
     match intake {
         Intake::Listener(listener) => loop {
@@ -350,12 +326,12 @@ async fn serve(
                 }
                 accepted = listener.accept() => match accepted {
                     Ok((stream, peer)) => {
-                        let handle = handle.clone();
+                        let connection = connection.clone();
                         let spec = spec.clone();
                         tokio::spawn(async move {
                             let result = match &spec {
-                                TunnelSpec::Local { target, .. } => forward_local(&handle, stream, peer, target).await,
-                                TunnelSpec::Dynamic { .. } => forward_socks(&handle, stream, peer).await,
+                                TunnelSpec::Local { target, .. } => forward_local(&connection, stream, peer, target).await,
+                                TunnelSpec::Dynamic { .. } => forward_socks(&connection, stream, peer).await,
                                 TunnelSpec::Remote { .. } => Ok(()),
                             };
                             if let Err(e) = result {
@@ -398,11 +374,11 @@ async fn serve(
                     },
                 }
             };
-            // Ask the server to stop listening; the disconnect that follows
-            // would end it anyway, so don't wait long.
+            // Ask the server to stop listening. The connection may live on
+            // for other tabs and tunnels, so this matters; don't wait long.
             let _ = tokio::time::timeout(
                 CANCEL_FORWARD_TIMEOUT,
-                handle.cancel_tcpip_forward(listen.host.clone(), bound_port),
+                connection.cancel_tcpip_forward(&listen.host, bound_port),
             )
             .await;
             reason
@@ -412,13 +388,13 @@ async fn serve(
 
 /// `-L`: open a direct-tcpip channel to the fixed target.
 async fn forward_local(
-    handle: &Handle<SshClientHandler>,
+    connection: &SshConnection,
     stream: TcpStream,
     peer: SocketAddr,
     target: &Endpoint,
 ) -> Result<(), String> {
-    let channel = handle
-        .channel_open_direct_tcpip(target.host.clone(), target.port as u32, peer.ip().to_string(), peer.port() as u32)
+    let channel = connection
+        .open_direct_tcpip(&target.host, target.port, &peer.ip().to_string(), peer.port())
         .await
         .map_err(|e| format!("could not open a channel to {target}: {e}"))?;
     pipe(channel, stream).await;
@@ -426,14 +402,14 @@ async fn forward_local(
 }
 
 /// `-D`: read the SOCKS request, then open a channel to whatever it asks for.
-async fn forward_socks(handle: &Handle<SshClientHandler>, mut stream: TcpStream, peer: SocketAddr) -> Result<(), String> {
+async fn forward_socks(connection: &SshConnection, mut stream: TcpStream, peer: SocketAddr) -> Result<(), String> {
     let request = match tokio::time::timeout(SOCKS_HANDSHAKE_TIMEOUT, socks::read_request(&mut stream)).await {
         Ok(Ok(request)) => request,
         Ok(Err(e)) => return Err(format!("SOCKS handshake failed: {e}")),
         Err(_) => return Err("SOCKS handshake timed out".to_string()),
     };
-    match handle
-        .channel_open_direct_tcpip(request.host.clone(), request.port as u32, peer.ip().to_string(), peer.port() as u32)
+    match connection
+        .open_direct_tcpip(&request.host, request.port, &peer.ip().to_string(), peer.port())
         .await
     {
         Ok(channel) => {
@@ -543,11 +519,10 @@ async fn pipe(mut channel: Channel<Msg>, mut stream: TcpStream) {
         return;
     }
 
-    // Let the server send CLOSE (russh answers it) instead of closing first:
-    // if we CLOSE while the server is still acknowledging our data, its late
-    // WINDOW_ADJUST makes russh 0.50 fail with WrongChannel and drop the whole
-    // SSH connection, killing every other connection of the tunnel. (Fixed
-    // upstream in russh 0.63.) The server never sends anything after its CLOSE.
+    // Let the server send CLOSE (russh answers it) instead of closing first,
+    // so it can still acknowledge the data we sent. (Before russh 0.54 a late
+    // WINDOW_ADJUST after our CLOSE dropped the whole connection, which is now
+    // shared with terminal tabs.) The server never sends anything after CLOSE.
     if !local_eof {
         let _ = channel.eof().await;
     }
@@ -566,13 +541,6 @@ async fn remove_if_current(active: &Mutex<HashMap<String, ActiveTunnel>>, rule_i
     let mut active = active.lock().await;
     if active.get(rule_id).is_some_and(|t| t.generation == generation) {
         active.remove(rule_id);
-    }
-}
-
-async fn disconnect_quietly(handle: &Handle<SshClientHandler>, jump_handle: Option<&Handle<SshClientHandler>>) {
-    let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
-    if let Some(jump) = jump_handle {
-        let _ = jump.disconnect(Disconnect::ByApplication, "", "en").await;
     }
 }
 
@@ -709,13 +677,17 @@ mod tests {
         let ssh_port: u16 = ssh_port.parse().unwrap();
         let user = std::env::var("SSH_TEST_USER").expect("SSH_TEST_USER");
         let pem = std::fs::read_to_string(std::env::var("SSH_TEST_KEY").expect("SSH_TEST_KEY")).unwrap();
-        let ssh = || SshTarget {
-            address: ssh_host.to_string(),
-            port: ssh_port,
-            username: user.clone(),
-            auth: SshAuth::PrivateKey { pem: pem.clone(), passphrase: None },
-            jump: None,
+        // One key: every rule runs on the same shared connection.
+        let ssh = || {
+            vec![crate::ssh::Hop {
+                key: Some("tunnel-e2e".to_string()),
+                address: ssh_host.to_string(),
+                port: ssh_port,
+                username: user.clone(),
+                auth: crate::ssh::SshAuth::PrivateKey { pem: pem.clone(), passphrase: None },
+            }]
         };
+        let pool = ConnectionPool::new();
 
         let config_home = std::env::temp_dir().join(format!("termimus-tunnel-test-{}", std::process::id()));
         std::env::set_var("XDG_CONFIG_HOME", &config_home);
@@ -735,7 +707,7 @@ mod tests {
             listen: Endpoint::new("127.0.0.1", local_port),
             target: Endpoint::new("127.0.0.1", echo_port),
         };
-        manager.start(db.clone(), "L".into(), ssh(), spec, sink.clone()).await.unwrap();
+        manager.start(db.clone(), &pool, "L".into(), ssh(), spec, sink.clone()).await.unwrap();
         assert_echo(local_port, b"hello via -L").await;
 
         // -R: sshd listens on remote_port and sends connections back to us.
@@ -744,7 +716,7 @@ mod tests {
             listen: Endpoint::new("127.0.0.1", remote_port),
             target: Endpoint::new("127.0.0.1", echo_port),
         };
-        manager.start(db.clone(), "R".into(), ssh(), spec, sink.clone()).await.unwrap();
+        manager.start(db.clone(), &pool, "R".into(), ssh(), spec, sink.clone()).await.unwrap();
         assert_echo(remote_port, b"hello via -R").await;
         // Large payload both ways.
         let big: Vec<u8> = (0..2_000_000u32).map(|i| (i % 251) as u8).collect();
@@ -755,14 +727,14 @@ mod tests {
             listen: Endpoint::new("127.0.0.1", echo_port),
             target: Endpoint::new("127.0.0.1", echo_port),
         };
-        let err = manager.start(db.clone(), "R-busy".into(), ssh(), spec, sink.clone()).await.unwrap_err();
+        let err = manager.start(db.clone(), &pool, "R-busy".into(), ssh(), spec, sink.clone()).await.unwrap_err();
         assert!(err.contains("refused to listen"), "{err}");
         assert!(!manager.list_active().await.contains(&"R-busy".to_string()));
 
         // -D: SOCKS5 with a host name resolved by the server, and SOCKS4a.
         let socks_port = free_port();
         let spec = TunnelSpec::Dynamic { listen: Endpoint::new("127.0.0.1", socks_port) };
-        manager.start(db.clone(), "D".into(), ssh(), spec, sink.clone()).await.unwrap();
+        manager.start(db.clone(), &pool, "D".into(), ssh(), spec, sink.clone()).await.unwrap();
         let (stream, code) = socks5_connect(socks_port, "localhost", echo_port).await;
         assert_eq!(code, 0, "SOCKS5 CONNECT should succeed");
         assert_echo_on(stream, b"hello via -D (socks5)").await;

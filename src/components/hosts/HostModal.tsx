@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useHostStore } from "../../stores/useHostStore";
 import { useKeychainStore } from "../../stores/useKeychainStore";
-import { api, DEFAULT_PORTS, Host, HostInput, HostProtocol, isSshHost, RdpOptions, VncOptions } from "../../lib/api";
+import { api, DEFAULT_PORTS, Host, HostInput, HostProtocol, isSshHost, jumpChain, RdpOptions, VncOptions } from "../../lib/api";
 import { DistroBadge, DISTRO_OPTIONS } from "./DistroBadge";
 import { CustomSelect } from "../ui/CustomSelect";
 import { copyText } from "../../lib/clipboard";
@@ -469,16 +469,21 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                   options={[
                     { value: "", label: "Direct Connection (No Jump Host)" },
                     ...hosts
-                      .filter((h) => h.id !== editingHost?.id && isSshHost(h))
-                      .map((h) => ({
-                        value: h.id,
-                        label: h.label,
-                        description: `(${h.username}@${h.address}:${h.port})`,
-                      })),
+                      .filter((h) => isSshHost(h) && !(editingHost && jumpChain(h, hosts).some((j) => j.id === editingHost.id)))
+                      .map((h) => {
+                        // In network order: the outermost jump host first.
+                        const via = jumpChain(h, hosts).slice(1).reverse().map((j) => j.label);
+                        return {
+                          value: h.id,
+                          label: h.label,
+                          description: `(${h.username}@${h.address}:${h.port})${via.length ? ` via ${via.join(" → ")}` : ""}`,
+                        };
+                      }),
                   ]}
                 />
                 <p className="mt-1 text-[11px] text-[var(--text-muted)] leading-relaxed">
-                  Traffic to this host will be securely tunneled through the selected Bastion server.
+                  Traffic to this host will be securely tunneled through the selected Bastion server, and through
+                  that server's own jump host when it has one.
                 </p>
                 {protocol === "vnc" && !jumpHostId && (
                   <div className="mt-2 flex items-start gap-2 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2.5 py-2 text-[11px] text-[var(--warning)]">

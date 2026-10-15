@@ -30,8 +30,9 @@ pub fn run() {
     let tunnel = Arc::new(TunnelManager::new());
     let pty = Arc::new(PtyManager::new());
     let remote = Arc::new(RemoteDesktopManager::new());
+    let pool = Arc::new(ssh::ConnectionPool::new());
 
-    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote };
+    let state = AppState { db, vault, ssh, sftp, tunnel, pty, remote, pool };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -127,6 +128,7 @@ pub fn run() {
             commands::remote_input,
             commands::remote_disconnect,
             commands::ssh_auth_prompt_respond,
+            commands::ssh_set_connection_sharing,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")
@@ -137,13 +139,11 @@ pub fn run() {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let ssh = app_handle.state::<AppState>().ssh.clone();
                 let remote = app_handle.state::<AppState>().remote.clone();
+                let pool = app_handle.state::<AppState>().pool.clone();
                 tauri::async_runtime::block_on(async move {
                     remote.disconnect_all().await;
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_secs(2),
-                        ssh.disconnect_all(),
-                    )
-                    .await;
+                    ssh.disconnect_all().await;
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), pool.disconnect_all()).await;
                 });
             }
         });

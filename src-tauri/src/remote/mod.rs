@@ -12,8 +12,6 @@ mod vnc;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
 
-use russh::client::Handle;
-use russh::Disconnect;
 use serde::Deserialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter};
@@ -22,7 +20,7 @@ use ::vnc::VncClient;
 use zeroize::Zeroizing;
 
 use crate::db::Database;
-use crate::ssh::{JumpHostConfig, SshClientHandler, SshProgressPayload};
+use crate::ssh::{ConnectionPool, Route, SshProgressPayload};
 pub use input::RemoteInput;
 
 /// Per-host VNC settings, stored as JSON in `hosts.protocol_options`.
@@ -61,7 +59,8 @@ pub enum RemoteProtocolTarget {
 pub struct RemoteTarget {
     pub address: String,
     pub port: u16,
-    pub jump: Option<JumpHostConfig>,
+    /// Jump hosts in front of the server (outermost first); empty = direct.
+    pub jump_route: Route,
     pub protocol: RemoteProtocolTarget,
 }
 
@@ -95,6 +94,7 @@ impl RemoteDesktopManager {
         &self,
         app: AppHandle,
         db: Arc<Database>,
+        pool: &ConnectionPool,
         session_id: String,
         target: RemoteTarget,
         on_frame: Channel<InvokeResponseBody>,
@@ -108,7 +108,7 @@ impl RemoteDesktopManager {
         self.cancelled.lock().await.remove(&session_id);
 
         let result = self
-            .do_connect(app, db, session_id.clone(), target, on_frame)
+            .do_connect(app, db, pool, session_id.clone(), target, on_frame)
             .await;
 
         self.connecting.lock().await.remove(&session_id);
@@ -120,6 +120,7 @@ impl RemoteDesktopManager {
         &self,
         app: AppHandle,
         db: Arc<Database>,
+        pool: &ConnectionPool,
         session_id: String,
         target: RemoteTarget,
         on_frame: Channel<InvokeResponseBody>,
@@ -145,18 +146,20 @@ impl RemoteDesktopManager {
         // A retry reuses the session id; drop whatever is left of the old one.
         self.sessions.write().await.remove(&session_id);
 
-        let RemoteTarget { address, port, jump, protocol } = target;
-        let connecting_msg = match &jump {
-            Some(j) => format!("Connecting to {address}:{port} via Jump Host {}:{}...", j.address, j.port),
+        let RemoteTarget { address, port, jump_route, protocol } = target;
+        let connecting_msg = match jump_route.last() {
+            Some(jump) => format!("Connecting to {address}:{port} via jump host {}...", jump.target()),
             None => format!("Connecting to {address}:{port}..."),
         };
         emit_progress(1, "connecting", &connecting_msg, false);
 
-        let (stream, jump_handle) = crate::ssh::open_transport(db.clone(), &address, port, jump.as_ref())
+        // Through the jump hosts' (possibly shared) SSH connection, which
+        // must stay up as long as the session runs.
+        let progress = |step: u8, step_name: &str, message: &str| emit_progress(step, step_name, message, false);
+        let (stream, jump) = crate::ssh::conn::open_stream(pool, &db, &jump_route, &address, port, &progress)
             .await
             .map_err(|e| fail(e))?;
         if self.is_cancelled(&session_id).await {
-            disconnect_jump(jump_handle).await;
             return Err("Connection cancelled".to_string());
         }
 
@@ -188,13 +191,7 @@ impl RemoteDesktopManager {
                 .map(|connection| Connected::Rdp { connection, view_only })
             }
         };
-        let connected = match handshake {
-            Ok(c) => c,
-            Err(e) => {
-                disconnect_jump(jump_handle).await;
-                return Err(fail(e));
-            }
-        };
+        let connected = handshake.map_err(|e| fail(e))?;
 
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let session = Arc::new(RemoteSession { input_tx });
@@ -207,7 +204,6 @@ impl RemoteDesktopManager {
                 let _ = client.close().await;
             }
             drop(connected);
-            disconnect_jump(jump_handle).await;
             return Err("Connection cancelled".to_string());
         }
 
@@ -240,7 +236,7 @@ impl RemoteDesktopManager {
             };
         tauri::async_runtime::spawn(async move {
             let result = session_loop.await;
-            disconnect_jump(jump_handle).await;
+            drop(jump);
             {
                 let mut map = sessions.write().await;
                 if map
@@ -334,8 +330,4 @@ async fn run_rdp(
     .await
 }
 
-async fn disconnect_jump(jump_handle: Option<Handle<SshClientHandler>>) {
-    if let Some(jump) = jump_handle {
-        let _ = jump.disconnect(Disconnect::ByApplication, "", "en").await;
-    }
-}
+

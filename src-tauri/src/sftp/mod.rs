@@ -1,4 +1,3 @@
-use russh::client::Handle;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::OpenFlags;
 use serde::{Deserialize, Serialize};
@@ -11,10 +10,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 use crate::db::Database;
-use crate::ssh::{JumpHostConfig, SshAuth, SshClientHandler};
+use crate::ssh::{ConnectionPool, Route, SshConnection};
 
 /// Largest file the inline text editor will load.
 const MAX_EDITOR_FILE_SIZE: u64 = 5 * 1024 * 1024;
+/// How long the server may take to start its SFTP subsystem.
+const SUBSYSTEM_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
@@ -30,9 +31,8 @@ pub struct SftpConnection {
     pub session_id: String,
     pub host_id: String,
     pub sftp: SftpSession,
-    // Keep the russh handles alive so the connection stays open
-    _handle: Handle<SshClientHandler>,
-    _jump_handle: Option<Handle<SshClientHandler>>,
+    /// Keeps the SSH connection open; it may be shared with terminal tabs.
+    _connection: Arc<SshConnection>,
 }
 
 pub struct SftpManager {
@@ -57,37 +57,68 @@ impl SftpManager {
             .ok_or_else(|| "SFTP session not found. Please connect first.".to_string())
     }
 
+    /// Open SFTP on the host's connection, reusing one a terminal tab (or
+    /// another SFTP pane) already has open, so there's no second login.
     pub async fn connect(
         &self,
         db: Arc<Database>,
+        pool: &ConnectionPool,
         session_id: String,
         host_id: String,
-        address: String,
-        port: u16,
-        username: String,
-        auth: SshAuth,
-        jump_host: Option<JumpHostConfig>,
+        route: Route,
     ) -> Result<String, String> {
-        let (handle, jump_handle) = crate::ssh::connect_authenticated(
-            db,
-            &address,
-            port,
-            &username,
-            &auth,
-            jump_host.as_ref(),
-        )
-        .await
-        .map_err(|e| format!("SFTP: {e}"))?;
-
-        let channel = handle
-            .channel_open_session()
+        let no_progress = |_: u8, _: &str, _: &str| {};
+        let (mut connection, reused) = pool
+            .connect(&db, &route, &no_progress)
             .await
-            .map_err(|e| format!("Channel open failed: {e}"))?;
+            .map_err(|e| format!("SFTP: {e}"))?;
 
-        channel
-            .request_subsystem(true, "sftp")
-            .await
-            .map_err(|e| format!("SFTP subsystem request failed: {e}"))?;
+        let channel = match connection.open_session().await {
+            Ok(channel) => channel,
+            // A shared connection may be at the server's session limit.
+            Err(russh::Error::ChannelOpenFailure(_)) if reused => {
+                connection = pool
+                    .connect_new(&db, &route, &no_progress)
+                    .await
+                    .map_err(|e| format!("SFTP: {e}"))?;
+                connection
+                    .open_session()
+                    .await
+                    .map_err(|e| format!("Channel open failed: {e}"))?
+            }
+            Err(e) => return Err(format!("Channel open failed: {e}")),
+        };
+
+        // Wait for the server's answer: without an SFTP subsystem, the
+        // session setup below would only time out.
+        let mut channel = channel;
+        let started = async {
+            channel
+                .request_subsystem(true, "sftp")
+                .await
+                .map_err(|e| format!("SFTP subsystem request failed: {e}"))?;
+            loop {
+                match channel.wait().await {
+                    Some(russh::ChannelMsg::Success) => return Ok(()),
+                    Some(russh::ChannelMsg::Failure) => {
+                        return Err("The server doesn't offer SFTP (no sftp subsystem in its sshd_config)".to_string())
+                    }
+                    Some(russh::ChannelMsg::Close) | None => return Err("The server closed the SFTP channel".to_string()),
+                    Some(_) => {}
+                }
+            }
+        };
+        match tokio::time::timeout(SUBSYSTEM_REPLY_TIMEOUT, started).await {
+            Ok(Ok(())) => {}
+            failed => {
+                // The connection may be shared: close just this channel.
+                let _ = channel.close().await;
+                return Err(match failed {
+                    Ok(Err(e)) => e,
+                    _ => "The server didn't answer the SFTP request".to_string(),
+                });
+            }
+        }
 
         let sftp = SftpSession::new(channel.into_stream())
             .await
@@ -102,8 +133,7 @@ impl SftpManager {
             session_id: session_id.clone(),
             host_id,
             sftp,
-            _handle: handle,
-            _jump_handle: jump_handle,
+            _connection: connection,
         });
 
         let mut connections = self.connections.lock().await;
@@ -362,8 +392,12 @@ impl SftpManager {
     }
 
     pub async fn disconnect(&self, session_id: &str) -> Result<(), String> {
-        let mut connections = self.connections.lock().await;
-        connections.remove(session_id);
+        let removed = self.connections.lock().await.remove(session_id);
+        // Ends the SFTP channel; the SSH connection closes once nothing else
+        // uses it.
+        if let Some(conn) = removed {
+            let _ = conn.sftp.close().await;
+        }
         Ok(())
     }
 }

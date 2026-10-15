@@ -23,11 +23,13 @@ import {
   Cloud,
   ExternalLink,
   ArrowUpCircle,
+  Network,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { BackupRestoreSection } from "../vault/BackupRestoreSection";
 import { SyncSection } from "../sync/SyncSection";
 import { TerminalThemeTab } from "./TerminalThemeTab";
+import { SessionsTab } from "./SessionsTab";
 import { useVaultStore } from "../../stores/useVaultStore";
 import { useKnownHostsStore } from "../../stores/useKnownHostsStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
@@ -42,7 +44,7 @@ import { api } from "../../lib/api";
 import { openExternalUrl } from "../../lib/openUrl";
 import kofiIcon from "../../assets/kofi.png";
 
-type SettingsTab = "security" | "terminal" | "sync" | "known_hosts" | "backup" | "about";
+type SettingsTab = "security" | "terminal" | "sessions" | "sync" | "known_hosts" | "backup" | "about";
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("security");
@@ -59,6 +61,7 @@ export function SettingsView() {
   }[] = [
     { id: "security", label: "Security & Vault", icon: Lock },
     { id: "terminal", label: "Appearance & Terminal", icon: Palette },
+    { id: "sessions", label: "SSH & Sessions", icon: Network },
     { id: "sync", label: "Self-Hosted Sync", icon: Cloud },
     {
       id: "known_hosts",
@@ -148,6 +151,7 @@ export function SettingsView() {
         <div className="w-full">
           {activeTab === "security" && <SecurityVaultTab />}
           {activeTab === "terminal" && <TerminalThemeTab />}
+          {activeTab === "sessions" && <SessionsTab />}
           {activeTab === "sync" && <SyncSection />}
           {activeTab === "known_hosts" && <KnownHostsTab />}
           {activeTab === "backup" && <BackupRestoreSection />}

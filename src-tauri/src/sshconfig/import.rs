@@ -1,7 +1,8 @@
 //! Importing hosts from `~/.ssh/config`. Every concrete `Host` alias can
 //! become a Termimus SSH host: the key its `IdentityFile` names goes into the
-//! Keychain (a Keychain copy of the same key is reused), a single-hop
-//! `ProxyJump` becomes its jump host, and host keys `~/.ssh/known_hosts`
+//! Keychain (a Keychain copy of the same key is reused), its `ProxyJump`
+//! becomes a chain of jump hosts (multi-hop `a,b`, and a jump host's own
+//! `ProxyJump`, as ssh follows them), and host keys `~/.ssh/known_hosts`
 //! already trusts are pinned so the first connection doesn't ask about them.
 //!
 //! A host without a usable key logs in with a password asked at connect time;
@@ -20,6 +21,7 @@ use super::known_hosts::{self, KnownHostsEntry};
 use super::{expand_tilde, parse_jump, read_limited, ResolvedHost, SshConfig};
 use crate::db::models::{Credential, Folder, Host, KeychainItem, KnownHost};
 use crate::db::Database;
+use crate::ssh::conn::MAX_JUMP_HOPS;
 use crate::sshkey::{self, KeyDetails};
 use crate::vault::VaultManager;
 
@@ -57,8 +59,10 @@ pub struct HostPreview {
     pub default_identity: bool,
     /// `ProxyJump` as written in the config.
     pub proxy_jump: Option<String>,
-    /// The key of a jump host the import would create.
-    pub jump_identity_file: Option<String>,
+    /// The jump hosts it goes through, outermost first.
+    pub jump_chain: Vec<String>,
+    /// Keys of the jump hosts the import would create for it.
+    pub jump_identity_files: Vec<String>,
     /// Label of the Termimus host with the same address, port and user.
     pub existing_host: Option<String>,
     /// An earlier alias for the same address, port and user.
@@ -228,44 +232,62 @@ impl Source {
         }
     }
 
-    /// The host for `alias` and the jump host it goes through, if any.
-    fn plan_alias(&self, alias: &str) -> (Plan, Option<Plan>) {
+    /// The host for `alias` and the jump hosts it goes through, outermost
+    /// first.
+    fn plan_alias(&self, alias: &str) -> (Plan, Vec<Plan>) {
         let mut plan = self.plan(self.config.resolve(alias, &self.home));
         let Some(spec) = plan.proxy_jump.clone() else {
-            return (plan, None);
+            return (plan, Vec::new());
         };
-        let hop = match parse_jump(&spec) {
-            Ok(hop) => hop,
-            Err(e) => {
-                plan.notes.push(format!("ProxyJump {spec}: {e}; imported without a jump host."));
-                return (plan, None);
-            }
-        };
-        // Like ssh, look the jump host up in the config by the name given.
-        let hop_name = hop.host.clone();
-        let mut resolved = self.config.resolve(&hop.host, &self.home);
-        if let Some(port) = hop.port {
-            resolved.port = port;
-        }
-        if hop.user.is_some() {
-            resolved.user = hop.user;
-        }
-        let jump = self.plan(resolved);
-        // A `Host *` ProxyJump also covers the jump host itself.
-        if jump.same_host(&plan) {
-            return (plan, None);
-        }
-        let chained = jump
-            .proxy_jump
-            .as_deref()
-            .is_some_and(|next| parse_jump(next).map_or(true, |next| !next.host.eq_ignore_ascii_case(&hop_name)));
-        if chained {
-            plan.notes.push(format!(
-                "Jump host {} goes through another jump host, which isn't supported; only the first hop is set.",
-                jump.label
+        let mut seen = vec![plan.clone()];
+        let mut notes = Vec::new();
+        let chain = self.jump_chain(&spec, &mut seen, &mut notes);
+        let chain = if chain.len() > MAX_JUMP_HOPS {
+            notes.push(format!(
+                "ProxyJump {spec} goes through more than {MAX_JUMP_HOPS} jump hosts; imported without a jump host."
             ));
+            Vec::new()
+        } else {
+            chain
+        };
+        plan.notes.extend(notes);
+        (plan, chain)
+    }
+
+    /// The hops of a `ProxyJump` value, outermost first. Like ssh, each hop is
+    /// looked up in the config by the name given, and the first hop's own
+    /// `ProxyJump` goes in front of it. A hop already on the way (a `Host *`
+    /// ProxyJump that covers the jump host itself, or a loop) is left out.
+    fn jump_chain(&self, spec: &str, seen: &mut Vec<Plan>, notes: &mut Vec<String>) -> Vec<Plan> {
+        let mut chain = Vec::new();
+        for (index, part) in spec.split(',').map(str::trim).enumerate() {
+            let hop = match parse_jump(part) {
+                Ok(hop) => hop,
+                Err(e) => {
+                    notes.push(format!("ProxyJump {spec}: {e}; imported without a jump host."));
+                    return Vec::new();
+                }
+            };
+            let mut resolved = self.config.resolve(&hop.host, &self.home);
+            if let Some(port) = hop.port {
+                resolved.port = port;
+            }
+            if hop.user.is_some() {
+                resolved.user = hop.user;
+            }
+            let jump = self.plan(resolved);
+            if seen.iter().any(|earlier| earlier.same_host(&jump)) {
+                continue;
+            }
+            seen.push(jump.clone());
+            if index == 0 {
+                if let Some(next) = jump.proxy_jump.clone() {
+                    chain.extend(self.jump_chain(&next, seen, notes));
+                }
+            }
+            chain.push(jump);
         }
-        (plan, Some(jump))
+        chain
     }
 
     fn key_preview(&self, path: &Path, keychain: &[KeychainItem]) -> KeyPreview {
@@ -459,6 +481,41 @@ fn folder_for(db: &Database, name: &str, now: &str) -> Result<String, String> {
     Ok(folder.id)
 }
 
+/// How many hops at the start of `chain` are Termimus hosts already, each
+/// reached through the one before it.
+fn existing_prefix(chain: &[Plan], existing: &[Host]) -> usize {
+    let mut parent: Option<&str> = None;
+    for (index, hop) in chain.iter().enumerate() {
+        match existing.iter().find(|host| hop.matches(host) && host.jump_host_id.as_deref() == parent) {
+            Some(host) => parent = Some(&host.id),
+            None => return index,
+        }
+    }
+    chain.len()
+}
+
+/// The id of the host for `plan` behind `parent`: an existing host or one
+/// created in this import, else a new one. A picked host takes over a host
+/// created earlier as a jump host.
+fn place(plan: Plan, parent: Option<String>, existing: &[Host], new_hosts: &mut Vec<NewHost>, picked: bool) -> String {
+    if !picked {
+        if let Some(host) = existing.iter().find(|host| plan.matches(host) && host.jump_host_id == parent) {
+            return host.id.clone();
+        }
+    }
+    if let Some(host) = new_hosts.iter_mut().find(|host| host.plan.same_host(&plan) && host.jump_host_id == parent) {
+        host.picked |= picked;
+        if picked {
+            host.plan.label = plan.label;
+        }
+        return host.id.clone();
+    }
+    let host = NewHost::new(plan, parent, picked);
+    let id = host.id.clone();
+    new_hosts.push(host);
+    id
+}
+
 pub fn preview(db: &Database, home: &Path, config_path: Option<&str>) -> Result<ImportPreview, String> {
     let source = Source::load(home, config_path)?;
     let existing = db.list_hosts().map_err(|e| e.to_string())?;
@@ -468,12 +525,11 @@ pub fn preview(db: &Database, home: &Path, config_path: Option<&str>) -> Result<
     let mut plans: Vec<Plan> = Vec::new();
     let mut key_paths: Vec<PathBuf> = Vec::new();
     for alias in source.config.aliases() {
-        let (plan, jump) = source.plan_alias(&alias);
-        // A jump host already in Termimus keeps its own credentials.
-        let jump_identity = jump
-            .filter(|jump| !existing.iter().any(|host| jump.matches(host)))
-            .and_then(|jump| jump.identity);
-        for path in [plan.identity.as_ref(), jump_identity.as_ref()].into_iter().flatten() {
+        let (plan, chain) = source.plan_alias(&alias);
+        // Jump hosts already in Termimus keep their own credentials.
+        let new_jumps = &chain[existing_prefix(&chain, &existing)..];
+        let jump_identities: Vec<&PathBuf> = new_jumps.iter().filter_map(|jump| jump.identity.as_ref()).collect();
+        for path in plan.identity.iter().chain(jump_identities.iter().copied()) {
             if !key_paths.contains(path) {
                 key_paths.push(path.clone());
             }
@@ -486,7 +542,8 @@ pub fn preview(db: &Database, home: &Path, config_path: Option<&str>) -> Result<
             identity_file: plan.identity.as_deref().map(path_string),
             default_identity: plan.default_identity,
             proxy_jump: plan.proxy_jump.clone(),
-            jump_identity_file: jump_identity.as_deref().map(path_string),
+            jump_chain: chain.iter().map(|jump| jump.label.clone()).collect(),
+            jump_identity_files: jump_identities.iter().map(|path| path_string(path)).collect(),
             existing_host: existing.iter().find(|host| plan.matches(host)).map(|host| host.label.clone()),
             same_as: plans.iter().find(|earlier| earlier.same_host(&plan)).map(|earlier| earlier.label.clone()),
             known_host_key: known_hosts::preferred_key(&source.known_hosts, &plan.address, plan.port).is_some(),
@@ -508,14 +565,17 @@ struct NewHost {
     id: String,
     plan: Plan,
     jump_host_id: Option<String>,
+    /// Picked in the import (vs. created as someone's jump host).
+    picked: bool,
 }
 
 impl NewHost {
-    fn new(plan: Plan) -> Self {
+    fn new(plan: Plan, jump_host_id: Option<String>, picked: bool) -> Self {
         NewHost {
             id: Uuid::new_v4().to_string(),
             plan,
-            jump_host_id: None,
+            jump_host_id,
+            picked,
         }
     }
 
@@ -553,41 +613,26 @@ pub fn import(db: &Database, vault: &VaultManager, home: &Path, request: &Import
     let now = Utc::now().to_rfc3339();
     let mut result = ImportResult::default();
 
-    // Hosts already in Termimus are left alone.
+    // Hosts already in Termimus are left alone. Each hop of a jump chain is
+    // a host reached the same way (same jump host) that exists already or was
+    // just created, or else a new host.
     let mut new_hosts: Vec<NewHost> = Vec::new();
-    let mut jumps: Vec<(usize, Plan)> = Vec::new();
     for alias in &request.aliases {
         if !aliases.contains(alias) {
             result.warnings.push(format!("{alias} is no longer in the config"));
             continue;
         }
-        let (plan, jump) = source.plan_alias(alias);
+        let (plan, chain) = source.plan_alias(alias);
         if existing.iter().any(|host| plan.matches(host)) {
             continue;
         }
-        if let Some(jump) = jump {
-            jumps.push((new_hosts.len(), jump));
+        let mut parent: Option<String> = None;
+        for hop in chain {
+            parent = Some(place(hop, parent, &existing, &mut new_hosts, false));
         }
-        new_hosts.push(NewHost::new(plan));
+        place(plan, parent, &existing, &mut new_hosts, true);
     }
-    result.hosts_added = new_hosts.len();
-
-    // A jump host is one of the imported hosts, a host already in Termimus,
-    // or else a new host of its own.
-    for (index, jump) in jumps {
-        let found = new_hosts
-            .iter()
-            .find(|host| host.plan.same_host(&jump))
-            .map(|host| host.id.clone())
-            .or_else(|| existing.iter().find(|host| jump.matches(host)).map(|host| host.id.clone()));
-        let jump_id = found.unwrap_or_else(|| {
-            let host = NewHost::new(jump);
-            let id = host.id.clone();
-            new_hosts.push(host);
-            id
-        });
-        new_hosts[index].jump_host_id = Some(jump_id);
-    }
+    result.hosts_added = new_hosts.iter().filter(|host| host.picked).count();
     result.jump_hosts_added = new_hosts.len() - result.hosts_added;
 
     // Every key is read and checked before anything is saved, so a wrong
@@ -828,11 +873,14 @@ Host gone
         let db = host("db");
         assert_eq!((db.address.as_str(), db.port, db.username.as_str()), ("10.0.0.20", 2222, "postgres"));
         assert_eq!(db.proxy_jump.as_deref(), Some("bastion"));
-        assert_eq!(db.jump_identity_file, Some(key_path(&f, "id_work")));
+        assert_eq!(db.jump_chain, ["bastion"]);
+        assert_eq!(db.jump_identity_files, [key_path(&f, "id_work")]);
         assert!(db.known_host_key && host("web").known_host_key && !host("bastion").known_host_key);
         assert!(db.notes.is_empty());
         assert!(host("legacy").notes[0].starts_with("ProxyCommand"));
-        assert!(host("multi").notes[0].contains("multi-hop"));
+        // Multi-hop: a, then b through a.
+        assert_eq!(host("multi").jump_chain, ["a", "b"]);
+        assert!(host("multi").notes.is_empty());
         assert_eq!(host("web-again").same_as.as_deref(), Some("web"));
 
         let key = |name: &str| preview.keys.iter().find(|k| k.path == key_path(&f, name)).unwrap();
@@ -864,8 +912,9 @@ Host gone
         req.key_passphrases.insert(key_path(&f, "id_locked"), "s3cret".to_string());
         let result = import(&f.db, &f.vault, &f.home, &req).unwrap();
         assert_eq!(result.hosts_added, 5);
-        // bastion (an alias that wasn't picked) and inner's literal jump host.
-        assert_eq!(result.jump_hosts_added, 2);
+        // bastion (an alias that wasn't picked), inner's literal jump host,
+        // and multi's a and b.
+        assert_eq!(result.jump_hosts_added, 4);
         // id_work and id_locked; id_ed25519 is id_work again.
         assert_eq!((result.keys_added, result.keys_reused), (2, 1));
         assert_eq!(result.host_keys_trusted, 2);
@@ -895,7 +944,9 @@ Host gone
         // Every id_work / id_ed25519 user shares one Keychain key.
         assert_eq!(host("web").credential_id, host("bastion").credential_id);
         assert_eq!(host("web").credential_id, host("inner").credential_id);
-        assert_eq!(host("multi").jump_host_id, None);
+        assert_eq!(host("multi").jump_host_id.as_deref(), Some(host("b").id.as_str()));
+        assert_eq!(host("b").jump_host_id.as_deref(), Some(host("a").id.as_str()));
+        assert_eq!(host("a").jump_host_id, None);
         assert_eq!((host("gone").auth_method.as_str(), host("gone").credential_id.as_deref()), ("password", None));
 
         let pin = f.db.get_known_host("10.0.0.20", 2222).unwrap().unwrap();
@@ -905,11 +956,58 @@ Host gone
         // Importing again adds nothing; the preview now shows them as existing.
         let again = import(&f.db, &f.vault, &f.home, &req).unwrap();
         assert_eq!((again.hosts_added, again.jump_hosts_added, again.keys_added), (0, 0, 0));
-        assert_eq!(f.db.list_hosts().unwrap().len(), 7);
+        assert_eq!(f.db.list_hosts().unwrap().len(), 9);
         let preview = preview(&f.db, &f.home, None).unwrap();
         assert_eq!(preview.hosts[0].existing_host.as_deref(), Some("web"));
         let work = preview.keys.iter().find(|k| k.path == key_path(&f, "id_work")).unwrap();
         assert_eq!(work.keychain_name.as_deref(), Some("id_work"));
+    }
+
+    #[test]
+    fn chained_and_looping_proxy_jumps() {
+        let home = std::env::temp_dir().join(format!("termimus-import-chain-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(home.join(".ssh")).unwrap();
+        std::fs::write(
+            home.join(".ssh/config"),
+            "Host app\n  HostName 10.1.0.5\n  User deploy\n  ProxyJump inner\n\
+             Host inner\n  HostName 10.1.0.1\n  User ops\n  ProxyJump outer\n\
+             Host outer\n  HostName 203.0.113.1\n  User ops\n\
+             Host loop-a\n  HostName 10.2.0.1\n  User x\n  ProxyJump loop-b\n\
+             Host loop-b\n  HostName 10.2.0.2\n  User x\n  ProxyJump loop-a\n\
+             Host *\n  ProxyJump outer\n",
+        )
+        .unwrap();
+        let db = Database::in_memory().unwrap();
+        let vault = VaultManager::new();
+        vault.set_key([1; 32]);
+
+        let preview = preview(&db, &home, None).unwrap();
+        let chain = |alias: &str| preview.hosts.iter().find(|h| h.alias == alias).unwrap().jump_chain.clone();
+        // inner's own ProxyJump goes in front of it.
+        assert_eq!(chain("app"), ["outer", "inner"]);
+        assert_eq!(chain("inner"), ["outer"]);
+        // `Host *` covers outer itself: no jump host.
+        assert!(chain("outer").is_empty());
+        // The loop back to loop-a is cut.
+        assert_eq!(chain("loop-a"), ["loop-b"]);
+
+        let mut request = request(&["app"]);
+        request.folder_name = None;
+        let result = import(&db, &vault, &home, &request).unwrap();
+        assert_eq!((result.hosts_added, result.jump_hosts_added), (1, 2));
+        let hosts = db.list_hosts().unwrap();
+        let id = |label: &str| hosts.iter().find(|h| h.label == label).unwrap().id.clone();
+        let jump = |label: &str| hosts.iter().find(|h| h.label == label).unwrap().jump_host_id.clone();
+        assert_eq!(jump("app"), Some(id("inner")));
+        assert_eq!(jump("inner"), Some(id("outer")));
+        assert_eq!(jump("outer"), None);
+
+        // The chain is in Termimus now: nothing to add, no jump keys needed.
+        let again = import(&db, &vault, &home, &self::request(&["inner", "outer"])).unwrap();
+        assert_eq!((again.hosts_added, again.jump_hosts_added), (0, 0));
+        let preview = super::preview(&db, &home, None).unwrap();
+        assert!(preview.hosts.iter().all(|h| h.jump_identity_files.is_empty()));
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]
@@ -943,7 +1041,7 @@ Host gone
     #[tokio::test(flavor = "multi_thread")]
     #[ignore]
     async fn import_end_to_end() {
-        use crate::ssh::{connect_authenticated, JumpHostConfig, SshAuth};
+        use crate::ssh::{ConnectionPool, Hop, SshAuth};
         use std::sync::Arc;
 
         let addr = std::env::var("SSH_TEST_ADDR").expect("SSH_TEST_ADDR");
@@ -981,39 +1079,40 @@ Host gone
         let inside = hosts.iter().find(|h| h.label == "inside").unwrap();
         let bastion = hosts.iter().find(|h| h.label == "bastion").unwrap();
         assert_eq!(inside.jump_host_id.as_deref(), Some(bastion.id.as_str()));
-        let auth_for = |host: &Host| {
+        let hop = |host: &Host| {
             let credential = db.get_credential(host.credential_id.as_deref().unwrap()).unwrap().unwrap();
             let pem = String::from_utf8(vault.decrypt(&credential.ciphertext, &credential.nonce).unwrap()).unwrap();
-            SshAuth::PrivateKey { pem, passphrase: None }
+            Hop {
+                key: None,
+                address: host.address.clone(),
+                port: host.port,
+                username: host.username.clone(),
+                auth: SshAuth::PrivateKey { pem, passphrase: None },
+            }
         };
         let pin = db.get_known_host(&bastion.address, bastion.port).unwrap().unwrap();
         println!("pinned from known_hosts: {} {}", pin.key_type, pin.fingerprint);
 
         // The imported pins verify both hops.
-        let (direct, _) = connect_authenticated(db.clone(), &bastion.address, bastion.port, &bastion.username, &auth_for(bastion), None)
-            .await
-            .expect("direct login");
+        let pool = ConnectionPool::new();
+        let quiet = |_: u8, _: &str, _: &str| {};
+        let (direct, _) = pool.connect(&db, &[hop(bastion)], &quiet).await.expect("direct login");
         drop(direct);
-        let jump = JumpHostConfig {
-            address: bastion.address.clone(),
-            port: bastion.port,
-            username: bastion.username.clone(),
-            auth: auth_for(bastion),
-        };
-        let (_session, _jump) =
-            connect_authenticated(db.clone(), &inside.address, inside.port, &inside.username, &auth_for(inside), Some(&jump))
-                .await
-                .expect("login through the jump host");
+        let (_through, _) = pool
+            .connect(&db, &[hop(bastion), hop(inside)], &quiet)
+            .await
+            .expect("login through the jump host");
 
         // A pinned key the server doesn't have is refused.
         let mut wrong = pin.clone();
         wrong.fingerprint = format!("SHA256:{}", "A".repeat(43));
         db.save_known_host(&wrong).unwrap();
-        let err = connect_authenticated(db.clone(), &bastion.address, bastion.port, &bastion.username, &auth_for(bastion), None)
+        let err = pool
+            .connect(&db, &[hop(bastion)], &quiet)
             .await
             .err()
             .expect("a changed host key must be refused");
-        println!("refused: {err}");
+        assert!(err.contains("IDENTIFICATION HAS CHANGED"), "{err}");
         std::fs::remove_dir_all(home).unwrap();
     }
 

@@ -148,7 +148,7 @@ export function SshConfigImportModal({ onClose }: { onClose: () => void }) {
     const paths = new Set<string>();
     for (const h of chosen) {
       if (h.identityFile) paths.add(h.identityFile);
-      if (h.jumpIdentityFile) paths.add(h.jumpIdentityFile);
+      for (const path of h.jumpIdentityFiles) paths.add(path);
     }
     return [...paths].map((p) => keysByPath.get(p)).filter((k): k is SshConfigKeyPreview => !!k);
   }, [chosen, keysByPath]);
@@ -367,7 +367,11 @@ export function SshConfigImportModal({ onClose }: { onClose: () => void }) {
                                 ) : (
                                   <KeyChip host={h} keyInfo={h.identityFile ? keysByPath.get(h.identityFile) : undefined} />
                                 )}
-                                {h.proxyJump && <Chip icon={Waypoints}>via {h.proxyJump}</Chip>}
+                                {h.jumpChain.length > 0 && (
+                                  <Chip icon={Waypoints} title={`ProxyJump ${h.proxyJump ?? ""}`}>
+                                    via {h.jumpChain.join(" → ")}
+                                  </Chip>
+                                )}
                                 {h.knownHostKey && (
                                   <Chip icon={ShieldCheck} title="~/.ssh/known_hosts has a key for this host">
                                     known host key

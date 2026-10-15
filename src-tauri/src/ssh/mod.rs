@@ -1,7 +1,6 @@
 use russh::client::{self, Handle, Handler};
 use russh::keys::ssh_key::HashAlg;
 use russh::keys::{decode_secret_key, PrivateKeyWithHashAlg};
-use russh::Disconnect;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
@@ -11,6 +10,7 @@ use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::db::models::KnownHost;
 use crate::db::Database;
+pub use conn::{ConnectionPool, Hop, Route, SshConnection};
 use auth_prompt::{AuthPromptRequest, AuthPrompter, PromptField, UiPrompter};
 use russh::client::{AuthResult, KeyboardInteractiveAuthResponse};
 use russh::MethodKind;
@@ -19,6 +19,7 @@ use zeroize::Zeroizing;
 pub mod auth_prompt;
 #[cfg(test)]
 mod auth_tests;
+pub mod conn;
 #[cfg(test)]
 pub(crate) mod e2e_tests;
 
@@ -103,10 +104,10 @@ pub struct SshClientHandler {
     pub address: String,
     pub port: u16,
     pub db: Arc<Database>,
-    /// Where connections from a remote port forward (`ssh -R`) are handed
-    /// off. `None` on connections that never requested one: any
-    /// forwarded-tcpip channel the server opens there is closed.
-    pub forwarded_tcpip: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
+    /// Where connections from remote port forwards (`ssh -R`) go, by the
+    /// port the server listens on. Channels for a port nobody asked for, or
+    /// whose tunnel already stopped, are closed.
+    pub forwards: Arc<conn::ForwardRouter>,
 }
 
 /// A connection the server accepted on a remote-forwarded port, delivered to
@@ -138,12 +139,12 @@ impl Handler for SshClientHandler {
             originator_address: originator_address.to_string(),
             originator_port,
         };
-        let rejected = match &self.forwarded_tcpip {
+        let rejected = match self.forwards.sender(connected_port) {
             Some(tx) => tx.send(forwarded).err().map(|e| e.0),
             None => Some(forwarded),
         };
-        // Nobody is serving forwards on this connection (never requested, or
-        // the tunnel already stopped): refuse instead of leaving it hanging.
+        // Nobody is serving this port (never requested, or the tunnel already
+        // stopped): refuse instead of leaving it hanging.
         if let Some(forwarded) = rejected {
             let _ = forwarded.channel.close().await;
         }
@@ -207,14 +208,6 @@ pub enum SshAuth {
     /// No password saved for the host: ask for it at every login.
     AskPassword,
     PrivateKey { pem: String, passphrase: Option<String> },
-}
-
-#[derive(Clone)]
-pub struct JumpHostConfig {
-    pub address: String,
-    pub port: u16,
-    pub username: String,
-    pub auth: SshAuth,
 }
 
 pub enum SshStream {
@@ -498,112 +491,11 @@ async fn keyboard_interactive<P: AuthPrompter>(
     Err("The server kept asking for more input; giving up".to_string())
 }
 
-/// Open a raw byte stream to `address:port`: a direct TCP connection, or a
-/// `direct-tcpip` channel through `jump` (ProxyJump) when the host sits behind
-/// a bastion. The jump hop is authenticated and TOFU-verified through
-/// `SshClientHandler`. Used for the SSH transport itself and for non-SSH
-/// protocols (VNC) that ride on the same bastion.
-///
-/// The returned jump handle must be kept alive while the stream is in use.
-pub async fn open_transport(
-    db: Arc<Database>,
-    address: &str,
-    port: u16,
-    jump: Option<&JumpHostConfig>,
-) -> Result<(SshStream, Option<Handle<SshClientHandler>>), String> {
-    match jump {
-        Some(jump) => {
-            let jump_tcp = tokio::net::TcpStream::connect((jump.address.as_str(), jump.port))
-                .await
-                .map_err(|e| format!("Failed to reach Jump Host {}:{}: {e}", jump.address, jump.port))?;
-            configure_tcp_stream(&jump_tcp);
-            let jump_config = client_config_for(&db, &jump.address, jump.port);
-            let jump_handler = SshClientHandler {
-                address: jump.address.clone(),
-                port: jump.port,
-                db,
-                forwarded_tcpip: None,
-            };
-            let mut j_handle = client::connect_stream(jump_config, jump_tcp, jump_handler)
-                .await
-                .map_err(|e| format!("Jump Host handshake failed: {e}"))?;
-            let jump_target = format!("{}@{} (jump host)", jump.username, jump.address);
-            if !authenticate(&mut j_handle, &jump.username, &jump.auth, &jump_target)
-                .await
-                .map_err(|e| format!("Jump Host {e}"))?
-            {
-                return Err("Jump Host authentication rejected by server".to_string());
-            }
-            let channel = j_handle
-                .channel_open_direct_tcpip(address.to_string(), port as u32, "127.0.0.1".to_string(), 0)
-                .await
-                .map_err(|e| format!("Failed to open tunnel through Jump Host to {address}:{port}: {e}"))?;
-            Ok((SshStream::Tunneled(channel.into_stream()), Some(j_handle)))
-        }
-        None => {
-            let tcp = tokio::net::TcpStream::connect((address, port))
-                .await
-                .map_err(|e| format!("TCP connection to {address}:{port} failed: {e}"))?;
-            configure_tcp_stream(&tcp);
-            Ok((SshStream::Direct(tcp), None))
-        }
-    }
-}
-
-/// Open an authenticated SSH connection to `address:port`, hopping through
-/// `jump` (ProxyJump) when the host is configured behind a bastion. Used by
-/// SFTP and tunnels; the terminal path (`do_connect`) does the same steps with
-/// progress events and cancel checkpoints. Both hops go through
-/// `SshClientHandler`, so TOFU host key verification applies to each.
-///
-/// Returns the target handle and the jump handle, which must be kept alive
-/// for as long as the target connection is in use.
-pub async fn connect_authenticated(
-    db: Arc<Database>,
-    address: &str,
-    port: u16,
-    username: &str,
-    auth: &SshAuth,
-    jump: Option<&JumpHostConfig>,
-) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
-    connect_authenticated_with_forwarding(db, address, port, username, auth, jump, None).await
-}
-
-/// Like [`connect_authenticated`], but hands channels the server opens for
-/// remote port forwards (`tcpip-forward` requests made on this connection)
-/// to `forwarded_tcpip`.
-pub async fn connect_authenticated_with_forwarding(
-    db: Arc<Database>,
-    address: &str,
-    port: u16,
-    username: &str,
-    auth: &SshAuth,
-    jump: Option<&JumpHostConfig>,
-    forwarded_tcpip: Option<mpsc::UnboundedSender<ForwardedTcpip>>,
-) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
-    let (stream, jump_handle) = open_transport(db.clone(), address, port, jump).await?;
-
-    let config = client_config_for(&db, address, port);
-    let handler = SshClientHandler {
-        address: address.to_string(),
-        port,
-        db,
-        forwarded_tcpip,
-    };
-    let mut handle = client::connect_stream(config, stream, handler)
-        .await
-        .map_err(|e| format!("SSH connection failed: {e}"))?;
-    if !authenticate(&mut handle, username, auth, &format!("{username}@{address}")).await? {
-        return Err("Authentication rejected by server".to_string());
-    }
-    Ok((handle, jump_handle))
-}
-
 pub struct SshSession {
     pub id: String,
-    handle: Handle<SshClientHandler>,
+    /// Possibly shared with other tabs, SFTP and tunnels to the same host.
+    connection: Arc<SshConnection>,
     cmd_tx: mpsc::UnboundedSender<SessionCommand>,
-    _jump_handle: Option<Handle<SshClientHandler>>,
 }
 
 pub struct SessionManager {
@@ -624,19 +516,17 @@ impl SessionManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect(
         &self,
         app: AppHandle,
         db: Arc<Database>,
+        pool: &ConnectionPool,
         session_id: String,
         host_id: Option<String>,
-        address: String,
-        port: u16,
-        username: String,
-        auth: SshAuth,
+        route: Route,
         cols: u16,
         rows: u16,
-        jump_host: Option<JumpHostConfig>,
     ) -> Result<(), String> {
         // Prevent duplicate concurrent connection attempts for the exact same session_id
         {
@@ -654,19 +544,11 @@ impl SessionManager {
             cancelled.remove(&session_id);
         }
 
-        // Clean up any stale existing session with this ID before starting fresh
-        {
-            let mut sessions = self.sessions.write().await;
-            if let Some(old_session) = sessions.remove(&session_id) {
-                let _ = old_session.handle.disconnect(Disconnect::ByApplication, "", "en").await;
-                if let Some(ref jump) = old_session._jump_handle {
-                    let _ = jump.disconnect(Disconnect::ByApplication, "", "en").await;
-                }
-            }
-        }
+        // A stale session with this id (a retry) closes its shell when dropped.
+        self.sessions.write().await.remove(&session_id);
 
         let res = self
-            .do_connect(app, db, session_id.clone(), host_id, address, port, username, auth, cols, rows, jump_host)
+            .do_connect(app, db, pool, session_id.clone(), host_id, route, cols, rows)
             .await;
 
         {
@@ -701,19 +583,17 @@ impl SessionManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn do_connect(
         &self,
         app: AppHandle,
         db: Arc<Database>,
+        pool: &ConnectionPool,
         session_id: String,
         host_id: Option<String>,
-        address: String,
-        port: u16,
-        username: String,
-        auth: SshAuth,
+        route: Route,
         cols: u16,
         rows: u16,
-        jump_host: Option<JumpHostConfig>,
     ) -> Result<(), String> {
         self.check_cancelled(&session_id).await?;
 
@@ -730,173 +610,54 @@ impl SessionManager {
                 },
             );
         };
-
-        // ── 1. Establish Transport Stream (Direct TCP or via Jump Host ProxyJump) ──
-        let (socket, jump_handle) = if let Some(jump) = jump_host {
-            emit_progress(1, "connecting", &format!("Connecting to Bastion / Jump Host {}:{}...", jump.address, jump.port), false);
-
-            let jump_tcp = match tokio::net::TcpStream::connect((jump.address.as_str(), jump.port)).await {
-                Ok(s) => {
-                    configure_tcp_stream(&s);
-                    s
-                }
-                Err(e) => {
-                    let msg = format!("Failed to reach Jump Host {}:{}: {e}", jump.address, jump.port);
-                    emit_progress(1, "error", &msg, true);
-                    return Err(msg);
-                }
-            };
-
-            self.check_cancelled(&session_id).await?;
-
-            let jump_config = client_config_for(&db, &jump.address, jump.port);
-            let jump_handler = SshClientHandler {
-                address: jump.address.clone(),
-                port: jump.port,
-                db: db.clone(),
-                forwarded_tcpip: None,
-            };
-
-            let mut j_handle = match client::connect_stream(jump_config, jump_tcp, jump_handler).await {
-                Ok(h) => h,
-                Err(e) => {
-                    let msg = format!("Jump Host handshake failed: {e}");
-                    emit_progress(1, "error", &msg, true);
-                    return Err(msg);
-                }
-            };
-
-            self.check_cancelled(&session_id).await?;
-
-            emit_progress(1, "authenticating", &format!("Authenticating to Jump Host as {}...", jump.username), false);
-
-            let jump_target = format!("{}@{} (jump host)", jump.username, jump.address);
-            match authenticate(&mut j_handle, &jump.username, &jump.auth, &jump_target).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    let msg = "Jump Host authentication rejected by server".to_string();
-                    emit_progress(1, "error", &msg, true);
-                    return Err(msg);
-                }
-                Err(e) => {
-                    let msg = format!("Jump Host {e}");
-                    emit_progress(1, "error", &msg, true);
-                    return Err(msg);
-                }
-            }
-
-            self.check_cancelled(&session_id).await?;
-
-            emit_progress(1, "connecting", &format!("Tunneling via Jump Host to {address}:{port}..."), false);
-
-            let channel = match j_handle.channel_open_direct_tcpip(
-                address.clone(),
-                port as u32,
-                "127.0.0.1".to_string(),
-                0,
-            ).await {
-                Ok(c) => c,
-                Err(e) => {
-                    let msg = format!("Failed to open tunnel through Jump Host to {address}:{port}: {e}");
-                    emit_progress(1, "error", &msg, true);
-                    return Err(msg);
-                }
-            };
-
-            self.check_cancelled(&session_id).await?;
-
-            (SshStream::Tunneled(channel.into_stream()), Some(j_handle))
-        } else {
-            emit_progress(1, "connecting", &format!("Resolving and connecting to {address}:{port}..."), false);
-
-            let s = match tokio::net::TcpStream::connect((address.as_str(), port)).await {
-                Ok(s) => {
-                    configure_tcp_stream(&s);
-                    s
-                }
-                Err(e) => {
-                    let msg = format!("Connection failed: {e}");
-                    emit_progress(1, "error", &msg, true);
-                    return Err(msg);
-                }
-            };
-            self.check_cancelled(&session_id).await?;
-
-            (SshStream::Direct(s), None)
+        let progress = |step: u8, step_name: &str, message: &str| emit_progress(step, step_name, message, false);
+        let fail = |step: u8, message: String| {
+            emit_progress(step, "error", &message, true);
+            message
         };
 
-        // ── 2. Target SSH Handshake over the stream ──
-        let config = client_config_for(&db, &address, port);
-        let handler = SshClientHandler {
-            address: address.clone(),
-            port,
-            db: db.clone(),
-            forwarded_tcpip: None,
-        };
-
-        let mut handle = match client::connect_stream(config, socket, handler).await {
-            Ok(h) => h,
-            Err(e) => {
-                let msg = format!("Connection to target failed: {e}");
-                emit_progress(1, "error", &msg, true);
-                return Err(msg);
-            }
-        };
-
+        // ── 1–3. Connection: through the jump hosts, verified and logged in.
+        // An open connection to the same host is reused (no second login).
+        let (mut connection, reused) = pool.connect(&db, &route, &progress).await.map_err(|e| fail(1, e))?;
         self.check_cancelled(&session_id).await?;
 
-        emit_progress(2, "host_key", "Verifying target host key (Trust On First Use)...", false);
-
-        emit_progress(3, "authenticating", &format!("Authenticating as {username}..."), false);
-
-        // Keyboard-interactive (2FA codes etc.) is asked through the UI here
-        // when the server wants more than the stored password or key.
-        match authenticate(&mut handle, &username, &auth, &format!("{username}@{address}")).await {
-            Ok(true) => {}
-            Ok(false) => {
-                let msg = "Authentication rejected by server".to_string();
-                emit_progress(3, "error", &msg, true);
-                return Err(msg);
-            }
-            Err(msg) => {
-                emit_progress(3, "error", &msg, true);
-                return Err(msg);
-            }
-        }
-
-        self.check_cancelled(&session_id).await?;
-
+        // ── 4. Shell channel with a PTY.
         emit_progress(4, "opening_channel", "Opening shell channel...", false);
-
-        let channel = match handle.channel_open_session().await {
-            Ok(c) => c,
-            Err(e) => {
-                let msg = format!("Channel open failed: {e}");
-                emit_progress(4, "error", &msg, true);
-                return Err(msg);
+        let channel = match connection.open_session().await {
+            Ok(channel) => channel,
+            // A shared connection may be at the server's session limit (sshd
+            // MaxSessions): log in again on a connection of its own.
+            Err(russh::Error::ChannelOpenFailure(_)) if reused => {
+                emit_progress(4, "opening_channel", "The open connection refused another shell; connecting separately...", false);
+                connection = pool.connect_new(&db, &route, &progress).await.map_err(|e| fail(1, e))?;
+                self.check_cancelled(&session_id).await?;
+                connection
+                    .open_session()
+                    .await
+                    .map_err(|e| fail(4, format!("Channel open failed: {e}")))?
             }
+            Err(e) => return Err(fail(4, format!("Channel open failed: {e}"))),
         };
 
-        self.check_cancelled(&session_id).await?;
-
-        if let Err(e) = channel
-            .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
-            .await
-        {
-            let msg = format!("PTY request failed: {e}");
-            emit_progress(4, "error", &msg, true);
-            return Err(msg);
+        let opened = async {
+            channel
+                .request_pty(true, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
+                .await
+                .map_err(|e| fail(4, format!("PTY request failed: {e}")))?;
+            channel
+                .request_shell(true)
+                .await
+                .map_err(|e| fail(4, format!("Shell request failed: {e}")))?;
+            // Last checkpoint before registration: past this point the session is
+            // live in the map, so a late cancel is handled by the connect() wrapper.
+            self.check_cancelled(&session_id).await
         }
-
-        if let Err(e) = channel.request_shell(true).await {
-            let msg = format!("Shell request failed: {e}");
-            emit_progress(4, "error", &msg, true);
-            return Err(msg);
+        .await;
+        if let Err(e) = opened {
+            // The connection may be shared: close just this channel.
+            let _ = channel.close().await;
+            return Err(e);
         }
-
-        // Last checkpoint before registration: past this point the session is
-        // live in the map, so a late cancel is handled by the connect() wrapper.
-        self.check_cancelled(&session_id).await?;
 
         emit_progress(5, "ready", "Shell session ready.", false);
 
@@ -904,9 +665,8 @@ impl SessionManager {
 
         let session = Arc::new(SshSession {
             id: session_id.clone(),
-            handle,
+            connection,
             cmd_tx,
-            _jump_handle: jump_handle,
         });
 
         {
@@ -1001,7 +761,12 @@ impl SessionManager {
                                     let _ = channel.window_change(cols, rows, 0, 0).await;
                                 }
                             }
-                            None => break,
+                            // The tab was closed: end this shell. The connection
+                            // itself may still serve other tabs, SFTP or tunnels.
+                            None => {
+                                let _ = channel.close().await;
+                                break;
+                            }
                         }
                     }
                 }
@@ -1023,6 +788,11 @@ impl SessionManager {
         }
 
         Ok(())
+    }
+
+    /// The connection a live terminal session runs on (for exec helpers).
+    pub async fn connection(&self, session_id: &str) -> Option<Arc<SshConnection>> {
+        self.sessions.read().await.get(session_id).map(|s| s.connection.clone())
     }
 
     pub async fn write(&self, session_id: &str, data: Vec<u8>) -> Result<(), String> {
@@ -1051,18 +821,10 @@ impl SessionManager {
     }
 
     pub async fn disconnect(&self, session_id: &str) -> Result<(), String> {
-        let mut sessions = self.sessions.write().await;
-        if let Some(session) = sessions.remove(session_id) {
-            let _ = session
-                .handle
-                .disconnect(Disconnect::ByApplication, "", "en")
-                .await;
-            // Close the bastion connection too (mirrors the stale-session
-            // cleanup in connect()), instead of relying on drop alone.
-            if let Some(ref jump) = session._jump_handle {
-                let _ = jump.disconnect(Disconnect::ByApplication, "", "en").await;
-            }
-        } else if self.connecting.lock().await.contains(session_id) {
+        // Dropping the session ends its shell; the connection closes once
+        // nothing else (another tab, SFTP, a tunnel) uses it.
+        let removed = self.sessions.write().await.remove(session_id);
+        if removed.is_none() && self.connecting.lock().await.contains(session_id) {
             // No registered session, but a connect is in flight for this id —
             // the tab was closed mid-connect. Mark it so do_connect aborts at
             // its next checkpoint (and so a session established in the gap
@@ -1072,17 +834,10 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Disconnects every live SSH session. Used for a clean shutdown when the
-    /// application exits, so servers see a proper SSH disconnect message
-    /// instead of a dropped TCP socket.
+    /// Ends every terminal session (app shutdown; the pool then says goodbye
+    /// on the connections).
     pub async fn disconnect_all(&self) {
-        let ids: Vec<String> = {
-            let sessions = self.sessions.read().await;
-            sessions.keys().cloned().collect()
-        };
-        for id in ids {
-            let _ = self.disconnect(&id).await;
-        }
+        self.sessions.write().await.clear();
     }
 }
 
@@ -1173,46 +928,22 @@ pub fn parse_os_release(output: &str) -> Option<String> {
 /// and store the distro icon for the host.
 pub async fn detect_os_via_exec(app: &AppHandle, db: Arc<Database>, session: Weak<SshSession>, host_id: String) {
     // The tab may already be closed.
-    let Some(session) = session.upgrade() else { return };
-    let result = tokio::time::timeout(Duration::from_secs(10), async {
-        let mut channel = session
-            .handle
-            .channel_open_session()
-            .await
-            .map_err(|e| e.to_string())?;
-        channel
-            .exec(true, "cat /etc/os-release")
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let mut output = String::new();
-        loop {
-            match channel.wait().await {
-                Some(russh::ChannelMsg::Data { ref data }) => {
-                    output.push_str(&String::from_utf8_lossy(data));
-                    if output.len() > 8192 {
-                        break;
-                    }
-                }
-                Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
-                _ => {}
-            }
-        }
-        // The channel isn't closed from our side: the server closes it when
-        // the command exits (closing first can race with its late window
-        // adjusts, which makes russh 0.50 drop the whole connection).
-        Ok::<_, String>(parse_os_release(&output))
-    })
+    let Some(connection) = session.upgrade().map(|s| s.connection.clone()) else { return };
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        connection.exec("cat /etc/os-release", None, 8192),
+    )
     .await;
-    drop(session);
+    drop(connection);
 
-    if let Ok(Ok(Some(slug))) = result {
-        if let Ok(()) = db.update_host_os_icon(&host_id, &slug) {
-            let _ = app.emit(
-                "host-os-detected",
-                serde_json::json!({ "host_id": host_id, "os_icon": slug }),
-            );
-        }
+    let Some(slug) = result.ok().and_then(Result::ok).and_then(|output| parse_os_release(&output.stdout_text())) else {
+        return;
+    };
+    if let Ok(()) = db.update_host_os_icon(&host_id, &slug) {
+        let _ = app.emit(
+            "host-os-detected",
+            serde_json::json!({ "host_id": host_id, "os_icon": slug }),
+        );
     }
 }
 
