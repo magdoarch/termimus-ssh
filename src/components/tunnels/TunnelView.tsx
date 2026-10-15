@@ -20,11 +20,13 @@ import { useConfirmStore } from "../../stores/useConfirmStore";
 import { TunnelModal } from "./TunnelModal";
 import { PortForwardRule, Host } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
+import { describeRoute, forwardTypeInfo } from "../../lib/tunnelRoute";
 
 export function TunnelView() {
   const {
     rules,
     activeRuleIds,
+    ruleErrors,
     isLoading,
     error,
     startingRuleId,
@@ -37,6 +39,7 @@ export function TunnelView() {
     useShallow((s) => ({
       rules: s.rules,
       activeRuleIds: s.activeRuleIds,
+      ruleErrors: s.ruleErrors,
       isLoading: s.isLoading,
       error: s.error,
       startingRuleId: s.startingRuleId,
@@ -132,7 +135,7 @@ export function TunnelView() {
             Port Forwarding / SSH Tunnels
           </h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Forward local ports through secure SSH tunnels to remote services.
+            Local, remote and dynamic (SOCKS) forwarding through SSH tunnels.
           </p>
         </div>
         <button
@@ -185,6 +188,7 @@ export function TunnelView() {
                   host={host}
                   isActive={isActive}
                   isBusy={isBusy}
+                  stopError={ruleErrors[rule.id]}
                   onToggle={toggleTunnel}
                   onEdit={openEditModal}
                   onDelete={handleDelete}
@@ -228,35 +232,33 @@ export function TunnelView() {
 
               <div className="my-1 h-[1px] bg-[var(--border)]" />
 
-              {/* Copy Local Address */}
+              {/* Copy Listen Address */}
               <button
                 onClick={async () => {
-                  await copyText(
-                    `${contextMenu.rule!.local_address}:${contextMenu.rule!.local_port}`
-                  );
-                  showCopyToast("Copied local address");
+                  await copyText(describeRoute(contextMenu.rule!).listen);
+                  showCopyToast("Copied listen address");
                   setContextMenu(null);
                 }}
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
               >
                 <Copy size={13} />
-                <span>Copy Local Address</span>
+                <span>{contextMenu.rule.forward_type === "dynamic" ? "Copy Proxy Address" : "Copy Listen Address"}</span>
               </button>
 
-              {/* Copy Remote Address */}
-              <button
-                onClick={async () => {
-                  await copyText(
-                    `${contextMenu.rule!.remote_address}:${contextMenu.rule!.remote_port}`
-                  );
-                  showCopyToast("Copied remote address");
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
-              >
-                <Copy size={13} />
-                <span>Copy Remote Address</span>
-              </button>
+              {/* Copy Destination Address (dynamic forwards have none) */}
+              {contextMenu.rule.forward_type !== "dynamic" && (
+                <button
+                  onClick={async () => {
+                    await copyText(describeRoute(contextMenu.rule!).target ?? "");
+                    showCopyToast("Copied destination address");
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <Copy size={13} />
+                  <span>Copy Destination Address</span>
+                </button>
+              )}
 
               <div className="my-1 h-[1px] bg-[var(--border)]" />
 
@@ -335,6 +337,8 @@ interface TunnelCardProps {
   host: Host | undefined;
   isActive: boolean;
   isBusy: boolean;
+  /** Why the tunnel stopped on its own, if it did */
+  stopError?: string;
   onToggle: (rule: PortForwardRule) => void;
   onEdit: (rule: PortForwardRule) => void;
   onDelete: (id: string, label?: string) => void;
@@ -346,11 +350,14 @@ const TunnelCard = memo(function TunnelCard({
   host,
   isActive,
   isBusy,
+  stopError,
   onToggle,
   onEdit,
   onDelete,
   onContextMenu,
 }: TunnelCardProps) {
+  const route = describeRoute(rule);
+  const type = forwardTypeInfo(rule.forward_type);
   return (
     <div
       onContextMenu={(e) => onContextMenu?.(e, rule)}
@@ -372,6 +379,12 @@ const TunnelCard = memo(function TunnelCard({
           <h3 className="truncate text-sm font-semibold text-[var(--text-primary)]">
             {rule.label}
           </h3>
+          <span
+            className="shrink-0 rounded border border-[var(--border)] bg-[var(--surface-high)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--text-muted)]"
+            title={type.description}
+          >
+            {type.flag} {type.label}
+          </span>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -396,19 +409,24 @@ const TunnelCard = memo(function TunnelCard({
 
       {/* Endpoint Routing Diagram */}
       <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-2.5 text-xs mb-3 space-y-1 font-mono">
-        <div className="flex items-center justify-between text-[var(--text-muted)]">
-          <span>Local:</span>
-          <span className="text-[var(--accent)] font-semibold">
-            {rule.local_address}:{rule.local_port}
-          </span>
+        <div className="flex items-center justify-between gap-2 text-[var(--text-muted)]">
+          <span className="shrink-0">{route.listenLabel}:</span>
+          <span className="truncate text-[var(--accent)] font-semibold">{route.listen}</span>
         </div>
-        <div className="flex items-center justify-between text-[var(--text-muted)]">
-          <span>Target:</span>
-          <span className="text-[var(--text-primary)]">
-            {rule.remote_address}:{rule.remote_port}
+        <div className="flex items-center justify-between gap-2 text-[var(--text-muted)]">
+          <span className="shrink-0">{route.targetLabel}:</span>
+          <span className="truncate text-[var(--text-primary)]">
+            {route.target ?? <span className="text-[var(--text-muted)] italic">any (chosen by each app)</span>}
           </span>
         </div>
       </div>
+
+      {stopError && !isActive && (
+        <div className="mb-3 flex items-start gap-1.5 rounded-md border border-[var(--danger)]/30 bg-[var(--danger)]/10 px-2 py-1.5 text-[11px] text-[var(--danger)]">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+          <span>Stopped: {stopError}</span>
+        </div>
+      )}
 
       {/* Via Host */}
       <div className="flex min-w-0 items-center gap-1.5 text-xs text-[var(--text-muted)] mb-4">

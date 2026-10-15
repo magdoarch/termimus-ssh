@@ -83,6 +83,12 @@ function App() {
   // Background real-time WebSocket live sync manager
   useLiveSync();
 
+  // Keep tunnel state in sync with the backend app-wide, so a tunnel that
+  // dies (e.g. SSH connection lost) shows as stopped wherever you are.
+  useEffect(() => {
+    useTunnelStore.getState().listenForStatus();
+  }, []);
+
   // Light / dark / follow-OS UI theme (CSS variables in index.css).
   useEffect(() => {
     applyAppTheme(appTheme);

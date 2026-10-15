@@ -17,7 +17,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
   - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`).
   - `remote/` — VNC (`vnc-rs`) and RDP (IronRDP) sessions.
   - `sftp/` — SFTP manager (`russh-sftp`) + local filesystem helpers.
-  - `tunnel/` — local port forwarding (`channel_open_direct_tcpip`).
+  - `tunnel/` — local (`-L`), remote (`-R`) and dynamic SOCKS (`-D`) port forwarding.
   - `vault/` — AES-256-GCM encryption + Argon2id key derivation. Master password/derived key lives only in memory (`VaultManager`), never persisted.
   - `db/` — SQLite via `rusqlite`. `models.rs` has all row structs; `mod.rs` has the `Database` struct with one method per query. Schema lives in `init_tables()`.
   - `commands/mod.rs` — every `#[tauri::command]` handler, plus `AppState` (holds `Arc<Database>`, `VaultManager`, `SessionManager`, `SftpManager`, `TunnelManager`). Register every new command in `src-tauri/src/lib.rs`'s `generate_handler!` list too.

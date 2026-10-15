@@ -78,8 +78,8 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Password Identities**: Store reusable username & password combinations to assign across multiple hosts without re-typing.
 
 ### 🌐 Port Forwarding & SSH Tunnels
-- **Multi-Type Tunnels**: Support for Local (`-L`), Remote (`-R`), and Dynamic SOCKS5 (`-D`) port forwarding.
-- **Live Status Toggles**: Monitor and manage forwarding rules with real-time active indicators.
+- **Multi-Type Tunnels**: Local (`-L`), Remote (`-R`), and Dynamic SOCKS4/4a/5 (`-D`, DNS resolved by the server) port forwarding, also through a jump host.
+- **Live Status Toggles**: Monitor and manage forwarding rules with real-time active indicators; a tunnel that drops (e.g. lost SSH connection) shows why it stopped.
 
 ### 📜 Snippets & Scripts
 - **Instant Script Runner**: Store frequently used shell scripts, deployment commands, and system diagnostics.
@@ -253,7 +253,7 @@ termimus/
 │   └── src/
 │       ├── ssh/                  # Russh async client & TOFU verification
 │       ├── sftp/                 # Russh-sftp engine & local filesystem
-│       ├── tunnel/               # Channel direct TCP/IP forwarder
+│       ├── tunnel/               # Local / remote / dynamic (SOCKS) port forwarding
 │       ├── vault/                # AES-256-GCM & Argon2id encryption manager
 │       ├── sshkey/               # ED25519/RSA/ECDSA key generation & derivation
 │       ├── db/                   # SQLite schema, queries & backup engine
