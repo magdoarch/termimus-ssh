@@ -560,9 +560,11 @@ mod tests {
         assert_eq!(command, "sh -c 'umask 077; echo \"a b\"; exit 0'");
         assert_eq!(sh_command("echo 'quoted'"), "sh -c 'echo '\\''quoted'\\'''");
         // Joining lines is only safe when no quoted string spans two lines.
-        for line in INSTALL_PUBLIC_KEY_SCRIPT.lines() {
-            assert_eq!(line.matches('"').count() % 2, 0, "quote spans lines at: {line}");
+        for script in [INSTALL_PUBLIC_KEY_SCRIPT, crate::hostinfo::stats::STATS_SCRIPT] {
+            for line in script.lines() {
+                assert_eq!(line.matches('"').count() % 2, 0, "quote spans lines at: {line}");
+            }
+            assert!(!sh_command(script).contains('\n'));
         }
-        assert!(!sh_command(INSTALL_PUBLIC_KEY_SCRIPT).contains('\n'));
     }
 }

@@ -23,6 +23,32 @@ export interface Host {
   updated_at: string;
 }
 
+/** One sample of a server's stats (see hostinfo::stats) */
+export interface HostStats {
+  hostname: string;
+  os: string;
+  kernel: string;
+  uptimeSecs: number;
+  load: [number, number, number];
+  cpuCount: number;
+  /** null on the first sample */
+  cpuPercent: number | null;
+  memTotalBytes: number;
+  memUsedBytes: number;
+  swapTotalBytes: number;
+  swapUsedBytes: number;
+  disks: { mount: string; filesystem: string; totalBytes: number; usedBytes: number }[];
+  /** Bytes per second, all interfaces but loopback; null on the first sample */
+  netRxRate: number | null;
+  netTxRate: number | null;
+}
+
+/** Payload of the "host-stats-{monitorId}" event */
+export interface HostStatsEvent {
+  stats: HostStats | null;
+  error: string | null;
+}
+
 /** A current one-time code (see ssh::totp) */
 export interface TotpCode {
   code: string;
@@ -574,6 +600,11 @@ export const api = {
     invoke<void>("remote_input", { sessionId, events }),
   remoteDisconnect: (sessionId: string) =>
     invoke<void>("remote_disconnect", { sessionId }),
+
+  /** Server dashboard: samples arrive as "host-stats-{monitorId}" events */
+  startHostMonitor: (hostId: string, monitorId: string, intervalSecs = 3) =>
+    invoke<void>("host_monitor_start", { hostId, monitorId, intervalSecs }),
+  stopHostMonitor: (monitorId: string) => invoke<void>("host_monitor_stop", { monitorId }),
 
   /** ssh-copy-id: add a Keychain key's public half to the host's authorized_keys */
   installPublicKey: (hostId: string, credentialId: string) =>

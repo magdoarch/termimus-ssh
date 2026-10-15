@@ -26,6 +26,8 @@ pub struct AppState {
     pub remote: Arc<RemoteDesktopManager>,
     /// SSH connections shared by terminal tabs, SFTP, tunnels and jump hosts.
     pub pool: Arc<ConnectionPool>,
+    /// Server dashboards: stats sampled over the host's connection.
+    pub monitor: Arc<crate::hostinfo::HostMonitor>,
 }
 
 /// Minimum master password length for new or changed vault passwords.
@@ -813,6 +815,35 @@ pub async fn ssh_install_public_key(
             output.stderr_text().trim()
         )),
     }
+}
+
+/// Start the server dashboard's stats for a host: samples arrive as
+/// `host-stats-{monitorId}` events every `interval_secs` (default 3).
+#[tauri::command]
+pub async fn host_monitor_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    host_id: String,
+    monitor_id: String,
+    interval_secs: Option<u64>,
+) -> Result<(), String> {
+    let host = state
+        .db
+        .get_host(&host_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Host not found".to_string())?;
+    let route = ssh_route(&state, &host)?;
+    let interval = std::time::Duration::from_secs(interval_secs.unwrap_or(3));
+    state
+        .monitor
+        .start(app, state.db.clone(), &state.pool, route, monitor_id, interval)
+        .await
+}
+
+#[tauri::command]
+pub async fn host_monitor_stop(state: State<'_, AppState>, monitor_id: String) -> Result<(), String> {
+    state.monitor.stop(&monitor_id).await;
+    Ok(())
 }
 
 /// Settings: share one SSH connection per host (on by default).

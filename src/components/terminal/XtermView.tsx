@@ -9,6 +9,7 @@ import { copyText } from "../../lib/clipboard";
 import { openExternalUrl } from "../../lib/openUrl";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { usePasteConfirmStore } from "../../stores/usePasteConfirmStore";
+import { useHostPanelStore } from "../../stores/useHostPanelStore";
 import {
   Copy,
   Clipboard,
@@ -21,6 +22,7 @@ import {
   RefreshCw,
   Check,
   Search,
+  Gauge,
 } from "lucide-react";
 import { api } from "../../lib/api";
 import { useSessionStore } from "../../stores/useSessionStore";
@@ -1052,6 +1054,23 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               {isMac ? "⌘K" : "Ctrl+Shift+K"}
             </span>
           </button>
+
+          {!isLocal && hostId && (
+            <>
+              <div className="my-1 h-[1px] bg-[var(--border)]" />
+              {/* Server dashboard over this tab's connection */}
+              <button
+                onClick={() => {
+                  useHostPanelStore.getState().open(hostId);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors"
+              >
+                <Gauge size={13} />
+                <span>Server Dashboard</span>
+              </button>
+            </>
+          )}
 
           {/* Font Size Zoom Controls */}
           <div className="flex items-center justify-between px-2.5 py-1 text-[11px] text-[var(--text-muted)] font-mono">

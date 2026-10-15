@@ -34,3 +34,19 @@ export function parentPath(path: string): string {
   if (idx <= 0) return "/";
   return normalized.substring(0, idx);
 }
+
+/** "3d 4h", "5h 12m", "42s" */
+export function formatDuration(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${Math.floor(seconds)}s`;
+}
+
+/** Bytes per second as "1.2 MB/s" */
+export function formatRate(bytesPerSecond: number): string {
+  return `${formatBytes(Math.max(0, Math.round(bytesPerSecond)))}/s`;
+}

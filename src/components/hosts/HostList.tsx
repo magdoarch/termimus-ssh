@@ -22,6 +22,7 @@ import {
   FileInput,
   ShieldCheck,
   KeyRound,
+  Gauge,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useHostStore } from "../../stores/useHostStore";
@@ -31,6 +32,7 @@ import { usePingStore } from "../../stores/usePingStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { useVaultStore } from "../../stores/useVaultStore";
 import { useInstallKeyStore } from "../../stores/useInstallKeyStore";
+import { useHostPanelStore } from "../../stores/useHostPanelStore";
 import { FolderModal } from "./FolderModal";
 import { SshConfigImportModal } from "./SshConfigImportModal";
 import { api, Host, Folder, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
@@ -850,6 +852,20 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 <Copy size={13} />
                 <span>Copy Address</span>
               </button>
+
+              {/* Server dashboard (stats over the host's connection) */}
+              {isSshHost(contextMenu.host!) && (
+                <button
+                  onClick={() => {
+                    useHostPanelStore.getState().open(contextMenu.host!.id);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <Gauge size={13} />
+                  <span>Server Dashboard</span>
+                </button>
+              )}
 
               {/* ssh-copy-id: authorize a Keychain key on this host */}
               {isSshHost(contextMenu.host!) && (
