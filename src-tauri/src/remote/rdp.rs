@@ -10,8 +10,11 @@
 //! here, Trust-On-First-Use, the same way SSH host keys are.
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use ironrdp_cliprdr::backend::ClipboardMessage;
+use ironrdp_cliprdr::CliprdrClient;
 
 use ironrdp_connector::connection_activation::ConnectionActivationState;
 use ironrdp_connector::{ClientConnector, ConnectionResult, Credentials, DesktopSize, ServerName};
@@ -22,17 +25,19 @@ use ironrdp_pdu::geometry::InclusiveRectangle;
 use ironrdp_pdu::rdp::capability_sets::{client_codecs_capabilities, MajorPlatformType};
 use ironrdp_pdu::rdp::client_info::{CompressionType, PerformanceFlags, TimezoneInfo};
 use ironrdp_session::image::DecodedImage;
-use ironrdp_session::{fast_path, ActiveStageBuilder, ActiveStageOutput};
+use ironrdp_session::{fast_path, ActiveStage, ActiveStageBuilder, ActiveStageOutput};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{single_sequence_step_read, split_tokio_framed, FramedWrite, TokioFramed};
 use sha2::{Digest, Sha256};
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use zeroize::Zeroizing;
 
 use super::frame::{FrameBatch, Rect};
 use super::input::RemoteInput;
+use super::rdp_clipboard::{unicode_text_format, ClipboardBridge, ClipboardEvent};
 use crate::db::models::KnownHost;
 use crate::db::Database;
 
@@ -45,6 +50,9 @@ const MAX_RECTS_PER_FLUSH: usize = 16;
 
 /// Key type recorded in `known_hosts` for pinned RDP TLS keys.
 pub const RDP_KEY_TYPE: &str = "rdp-tls";
+
+/// How often CLIPRDR lock timeouts are driven.
+const CLIPBOARD_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
 
 /// One wheel notch in RDP rotation units.
 const WHEEL_NOTCH: i16 = 120;
@@ -62,6 +70,9 @@ pub struct RdpLogin {
 pub struct RdpConnection {
     framed: UpgradedFramed,
     result: ConnectionResult,
+    clipboard_rx: mpsc::UnboundedReceiver<ClipboardEvent>,
+    /// Text offered to the server by the CLIPRDR bridge.
+    local_clipboard: Arc<Mutex<Option<String>>>,
 }
 
 impl RdpConnection {
@@ -142,6 +153,12 @@ where
     // meaningful local socket address to report.
     let client_addr = SocketAddr::from(([127, 0, 0, 1], 0));
     let mut connector = ClientConnector::new(config, client_addr);
+    let (clipboard_tx, clipboard_rx) = mpsc::unbounded_channel();
+    let local_clipboard = Arc::new(Mutex::new(None));
+    connector.attach_static_channel(CliprdrClient::new(Box::new(ClipboardBridge::new(
+        clipboard_tx,
+        local_clipboard.clone(),
+    ))));
     let mut framed = TokioFramed::new(stream);
 
     let should_upgrade = ironrdp_tokio::connect_begin(&mut framed, &mut connector)
@@ -175,7 +192,12 @@ where
     .await
     .map_err(|e| format!("RDP login failed: {}", describe_connector_error(&e)))?;
 
-    Ok(RdpConnection { framed, result })
+    Ok(RdpConnection {
+        framed,
+        result,
+        clipboard_rx,
+        local_clipboard,
+    })
 }
 
 fn describe_connector_error(e: &ironrdp_connector::ConnectorError) -> String {
@@ -347,15 +369,43 @@ fn flush_dirty(
         .map_err(|e| format!("Frontend frame channel closed: {e}"))
 }
 
+/// Encode a CLIPRDR action queued by the clipboard bridge.
+fn clipboard_frames(stage: &mut ActiveStage, message: ClipboardMessage) -> Result<Vec<ActiveStageOutput>, String> {
+    let Some(cliprdr) = stage.get_svc_processor_mut::<CliprdrClient>() else {
+        return Ok(Vec::new());
+    };
+    let messages = match message {
+        ClipboardMessage::SendInitiateCopy(formats) => cliprdr.initiate_copy(&formats),
+        ClipboardMessage::SendInitiatePaste(format) => cliprdr.initiate_paste(format),
+        ClipboardMessage::SendFormatData(response) => cliprdr.submit_format_data(response),
+        // File transfer isn't supported; backend errors need no reply.
+        _ => return Ok(Vec::new()),
+    }
+    .map_err(|e| format!("RDP clipboard error: {e}"))?;
+    let frame = stage
+        .process_svc_processor_messages(messages)
+        .map_err(|e| format!("RDP clipboard error: {e}"))?;
+    Ok(vec![ActiveStageOutput::ResponseFrame(frame)])
+}
+
 /// Run the active session until the server ends it or the input channel
 /// closes (user disconnect).
 pub async fn run(
     connection: RdpConnection,
     mut input_rx: mpsc::UnboundedReceiver<RemoteInput>,
     on_frame: &Channel<InvokeResponseBody>,
+    app: &AppHandle,
+    session_id: &str,
     view_only: bool,
 ) -> Result<(), String> {
-    let RdpConnection { framed, result } = connection;
+    let RdpConnection {
+        framed,
+        result,
+        mut clipboard_rx,
+        local_clipboard,
+    } = connection;
+    let clipboard_event = format!("remote-clipboard-{session_id}");
+    let mut clipboard_cleanup = tokio::time::interval(CLIPBOARD_CLEANUP_INTERVAL);
     let (mut reader, mut writer) = split_tokio_framed(framed);
     let desktop = result.desktop_size;
     let mut image = DecodedImage::new(PixelFormat::RgbA32, desktop.width, desktop.height);
@@ -404,6 +454,13 @@ pub async fn run(
                     return Ok(());
                 }
                 Some(input) if view_only && input.is_interactive() => Vec::new(),
+                Some(RemoteInput::Clipboard { text }) => {
+                    // Offer the text; the server requests it when the remote side pastes.
+                    if let Ok(mut offered) = local_clipboard.lock() {
+                        *offered = Some(text);
+                    }
+                    clipboard_frames(&mut stage, ClipboardMessage::SendInitiateCopy(vec![unicode_text_format()]))?
+                }
                 Some(input) => {
                     let ops = to_operations(input);
                     if ops.is_empty() {
@@ -415,6 +472,25 @@ pub async fn run(
                             .map_err(|e| format!("RDP input error: {e}"))?
                     }
                 }
+            },
+            Some(event) = clipboard_rx.recv() => match event {
+                ClipboardEvent::Message(message) => clipboard_frames(&mut stage, message)?,
+                ClipboardEvent::RemoteText(text) => {
+                    let _ = app.emit(&clipboard_event, text);
+                    Vec::new()
+                }
+            },
+            _ = clipboard_cleanup.tick() => match stage.get_svc_processor_mut::<CliprdrClient>() {
+                Some(cliprdr) => match cliprdr.drive_timeouts() {
+                    Ok(messages) => {
+                        let frame = stage
+                            .process_svc_processor_messages(messages)
+                            .map_err(|e| format!("RDP clipboard error: {e}"))?;
+                        if frame.is_empty() { Vec::new() } else { vec![ActiveStageOutput::ResponseFrame(frame)] }
+                    }
+                    Err(_) => Vec::new(),
+                },
+                None => Vec::new(),
             },
             _ = tick.tick() => {
                 flush_dirty(&mut dirty, &image, &mut batch, on_frame)?;

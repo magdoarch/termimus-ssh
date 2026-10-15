@@ -5,6 +5,7 @@
 
 mod frame;
 pub mod rdp;
+mod rdp_clipboard;
 pub mod input;
 mod vnc;
 
@@ -228,7 +229,14 @@ impl RemoteDesktopManager {
                     session_id.clone(),
                     view_only,
                 )),
-                Connected::Rdp { connection, view_only } => Box::pin(run_rdp(connection, input_rx, on_frame, view_only)),
+                Connected::Rdp { connection, view_only } => Box::pin(run_rdp(
+                    connection,
+                    input_rx,
+                    on_frame,
+                    app.clone(),
+                    session_id.clone(),
+                    view_only,
+                )),
             };
         tauri::async_runtime::spawn(async move {
             let result = session_loop.await;
@@ -316,9 +324,14 @@ async fn run_rdp(
     connection: rdp::RdpConnection,
     input_rx: mpsc::UnboundedReceiver<RemoteInput>,
     on_frame: Channel<InvokeResponseBody>,
+    app: AppHandle,
+    session_id: String,
     view_only: bool,
 ) -> Result<(), String> {
-    run_not_send(move || async move { rdp::run(connection, input_rx, &on_frame, view_only).await }).await
+    run_not_send(move || async move {
+        rdp::run(connection, input_rx, &on_frame, &app, &session_id, view_only).await
+    })
+    .await
 }
 
 async fn disconnect_jump(jump_handle: Option<Handle<SshClientHandler>>) {
