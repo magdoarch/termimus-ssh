@@ -2034,3 +2034,16 @@ pub async fn remote_disconnect(state: State<'_, AppState>, session_id: String) -
     state.remote.disconnect(&session_id).await;
     Ok(())
 }
+
+// ================= LOGIN PROMPTS (2FA / KEYBOARD-INTERACTIVE) =================
+
+/// Answer a keyboard-interactive prompt shown during a login (e.g. a 2FA
+/// code); `answers: None` cancels that login.
+#[tauri::command]
+pub fn ssh_auth_prompt_respond(request_id: String, answers: Option<Vec<String>>) -> Result<(), String> {
+    if crate::ssh::auth_prompt::respond(&request_id, answers) {
+        Ok(())
+    } else {
+        Err("This login prompt has expired".to_string())
+    }
+}

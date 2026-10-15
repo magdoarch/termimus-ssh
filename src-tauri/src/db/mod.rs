@@ -25,6 +25,18 @@ impl Database {
         Ok(db)
     }
 
+    /// A throwaway database (tests).
+    #[cfg(test)]
+    pub fn in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+        let db = Database {
+            conn: std::sync::Mutex::new(conn),
+        };
+        db.init_tables()?;
+        Ok(db)
+    }
+
     fn init_tables(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 

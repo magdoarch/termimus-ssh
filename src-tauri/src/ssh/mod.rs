@@ -4,13 +4,25 @@ use russh::keys::{decode_secret_key, PrivateKeyWithHashAlg};
 use russh::Disconnect;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex, RwLock};
 
 use crate::db::models::KnownHost;
 use crate::db::Database;
+use auth_prompt::{AuthPromptRequest, AuthPrompter, PromptField, UiPrompter};
+use russh::client::{AuthResult, KeyboardInteractiveAuthResponse};
+use russh::MethodKind;
+use zeroize::Zeroizing;
+
+pub mod auth_prompt;
+#[cfg(test)]
+mod auth_tests;
+
+/// Keyboard-interactive rounds allowed per login: PAM stacks ask a few, a
+/// server that keeps asking must not hang the connect forever.
+const MAX_KBD_INTERACTIVE_ROUNDS: usize = 10;
 
 /// Configures a `TcpStream` with low-latency (`TCP_NODELAY`) and socket-level
 /// TCP keepalive (15s idle probe, 5s retry interval) to prevent stateful NAT routers,
@@ -246,7 +258,15 @@ pub async fn authenticate_publickey_smart<H: russh::client::Handler>(
         .await
         .map_err(|e| format!("Auth error: {e}"))?;
 
-    if !res.success() && is_rsa {
+    // Retry other RSA signature hashes only while the server still offers
+    // publickey: if it doesn't, the key was accepted as a first factor
+    // (e.g. `AuthenticationMethods publickey,keyboard-interactive`) or
+    // publickey is disabled, and retrying can't help.
+    let still_offers_publickey = matches!(
+        &res,
+        AuthResult::Failure { remaining_methods } if remaining_methods.contains(&MethodKind::PublicKey)
+    );
+    if is_rsa && still_offers_publickey {
         for fallback in [Some(HashAlg::Sha256), Some(HashAlg::Sha512), None] {
             if fallback == best_hash {
                 continue;
@@ -264,12 +284,32 @@ pub async fn authenticate_publickey_smart<H: russh::client::Handler>(
     Ok(res)
 }
 
+/// Authenticate with the stored credential, asking the user through the UI
+/// for anything else the server wants (see [`authenticate_with`]).
+/// `target` names the login in prompts, e.g. "root@10.0.0.5".
 async fn authenticate(
     handle: &mut Handle<SshClientHandler>,
     username: &str,
     auth: &SshAuth,
+    target: &str,
 ) -> Result<bool, String> {
-    let res = match auth {
+    authenticate_with(handle, username, auth, target, &UiPrompter).await
+}
+
+/// Authenticate with the stored password or key, then continue with
+/// keyboard-interactive when the server lists it as a remaining method:
+/// two-factor setups (`AuthenticationMethods publickey,keyboard-interactive`,
+/// PAM password + OTP, Duo) and servers that only take passwords through
+/// keyboard-interactive. Prompts the stored password can't answer go to
+/// `prompter`.
+pub(crate) async fn authenticate_with<P: AuthPrompter>(
+    handle: &mut Handle<SshClientHandler>,
+    username: &str,
+    auth: &SshAuth,
+    target: &str,
+    prompter: &P,
+) -> Result<bool, String> {
+    let first = match auth {
         SshAuth::Password(password) => handle
             .authenticate_password(username, password)
             .await
@@ -280,7 +320,68 @@ async fn authenticate(
             authenticate_publickey_smart(handle, username, key_pair).await?
         }
     };
-    Ok(res.success())
+    match first {
+        AuthResult::Success => Ok(true),
+        AuthResult::Failure { remaining_methods } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
+            let stored_password = match auth {
+                SshAuth::Password(password) => Some(Zeroizing::new(password.clone())),
+                SshAuth::PrivateKey { .. } => None,
+            };
+            keyboard_interactive(handle, username, stored_password, target, prompter).await
+        }
+        AuthResult::Failure { .. } => Ok(false),
+    }
+}
+
+async fn keyboard_interactive<P: AuthPrompter>(
+    handle: &mut Handle<SshClientHandler>,
+    username: &str,
+    mut stored_password: Option<Zeroizing<String>>,
+    target: &str,
+    prompter: &P,
+) -> Result<bool, String> {
+    let kbd_error = |e: russh::Error| format!("Keyboard-interactive auth error: {e}");
+    let mut response = handle
+        .authenticate_keyboard_interactive_start(username, None::<String>)
+        .await
+        .map_err(kbd_error)?;
+
+    for _ in 0..MAX_KBD_INTERACTIVE_ROUNDS {
+        match response {
+            KeyboardInteractiveAuthResponse::Success => return Ok(true),
+            KeyboardInteractiveAuthResponse::Failure { .. } => return Ok(false),
+            KeyboardInteractiveAuthResponse::InfoRequest { name, instructions, prompts } => {
+                let fields: Vec<PromptField> = prompts
+                    .into_iter()
+                    .map(|p| PromptField { prompt: p.prompt, echo: p.echo })
+                    .collect();
+                let (mut answers, ask) = auth_prompt::plan_answers(&fields, &mut stored_password);
+                if !ask.is_empty() {
+                    let request = AuthPromptRequest {
+                        target: target.to_string(),
+                        name,
+                        instructions,
+                        prompts: ask.iter().map(|&i| fields[i].clone()).collect(),
+                    };
+                    let user_answers = prompter
+                        .ask(request)
+                        .await
+                        .filter(|a| a.len() == ask.len())
+                        .ok_or_else(|| "Authentication cancelled".to_string())?;
+                    for (index, answer) in ask.into_iter().zip(user_answers) {
+                        answers[index] = Some(answer);
+                    }
+                }
+                // Servers may also send rounds with no prompts at all.
+                let answers = answers.into_iter().map(Option::unwrap_or_default).collect();
+                response = handle
+                    .authenticate_keyboard_interactive_respond(answers)
+                    .await
+                    .map_err(kbd_error)?;
+            }
+        }
+    }
+    Err("The server kept asking for more input; giving up".to_string())
 }
 
 /// Open a raw byte stream to `address:port`: a direct TCP connection, or a
@@ -311,7 +412,8 @@ pub async fn open_transport(
             let mut j_handle = client::connect_stream(default_client_config(), jump_tcp, jump_handler)
                 .await
                 .map_err(|e| format!("Jump Host handshake failed: {e}"))?;
-            if !authenticate(&mut j_handle, &jump.username, &jump.auth)
+            let jump_target = format!("{}@{} (jump host)", jump.username, jump.address);
+            if !authenticate(&mut j_handle, &jump.username, &jump.auth, &jump_target)
                 .await
                 .map_err(|e| format!("Jump Host {e}"))?
             {
@@ -375,7 +477,7 @@ pub async fn connect_authenticated_with_forwarding(
     let mut handle = client::connect_stream(default_client_config(), stream, handler)
         .await
         .map_err(|e| format!("SSH connection failed: {e}"))?;
-    if !authenticate(&mut handle, username, auth).await? {
+    if !authenticate(&mut handle, username, auth, &format!("{username}@{address}")).await? {
         return Err("Authentication rejected by server".to_string());
     }
     Ok((handle, jump_handle))
@@ -513,8 +615,6 @@ impl SessionManager {
             );
         };
 
-        let has_jump = jump_host.is_some();
-
         // ── 1. Establish Transport Stream (Direct TCP or via Jump Host ProxyJump) ──
         let (socket, jump_handle) = if let Some(jump) = jump_host {
             emit_progress(1, "connecting", &format!("Connecting to Bastion / Jump Host {}:{}...", jump.address, jump.port), false);
@@ -554,38 +654,19 @@ impl SessionManager {
 
             emit_progress(1, "authenticating", &format!("Authenticating to Jump Host as {}...", jump.username), false);
 
-            let j_authenticated = match &jump.auth {
-                SshAuth::Password(password) => match j_handle.authenticate_password(&jump.username, password).await {
-                    Ok(r) => r.success(),
-                    Err(e) => {
-                        let msg = format!("Jump Host auth error: {e}");
-                        emit_progress(1, "error", &msg, true);
-                        return Err(msg);
-                    }
-                },
-                SshAuth::PrivateKey { pem, passphrase } => {
-                    let key_pair = match decode_secret_key(pem, passphrase.as_deref()) {
-                        Ok(k) => k,
-                        Err(e) => {
-                            let msg = format!("Invalid Jump Host private key: {e}");
-                            emit_progress(1, "error", &msg, true);
-                            return Err(msg);
-                        }
-                    };
-                    match authenticate_publickey_smart(&mut j_handle, &jump.username, key_pair).await {
-                        Ok(r) => r.success(),
-                        Err(msg) => {
-                            emit_progress(1, "error", &msg, true);
-                            return Err(msg);
-                        }
-                    }
+            let jump_target = format!("{}@{} (jump host)", jump.username, jump.address);
+            match authenticate(&mut j_handle, &jump.username, &jump.auth, &jump_target).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    let msg = "Jump Host authentication rejected by server".to_string();
+                    emit_progress(1, "error", &msg, true);
+                    return Err(msg);
                 }
-            };
-
-            if !j_authenticated {
-                let msg = "Jump Host authentication rejected by server".to_string();
-                emit_progress(1, "error", &msg, true);
-                return Err(msg);
+                Err(e) => {
+                    let msg = format!("Jump Host {e}");
+                    emit_progress(1, "error", &msg, true);
+                    return Err(msg);
+                }
             }
 
             self.check_cancelled(&session_id).await?;
@@ -652,38 +733,19 @@ impl SessionManager {
 
         emit_progress(3, "authenticating", &format!("Authenticating as {username}..."), false);
 
-        let authenticated = match &auth {
-            SshAuth::Password(password) => match handle.authenticate_password(&username, password).await {
-                Ok(r) => r,
-                Err(e) => {
-                    let msg = format!("Auth error: {e}");
-                    emit_progress(3, "error", &msg, true);
-                    return Err(msg);
-                }
-            },
-            SshAuth::PrivateKey { pem, passphrase } => {
-                let key_pair = match decode_secret_key(pem, passphrase.as_deref()) {
-                    Ok(k) => k,
-                    Err(e) => {
-                        let msg = format!("Invalid private key: {e}");
-                        emit_progress(3, "error", &msg, true);
-                        return Err(msg);
-                    }
-                };
-                match authenticate_publickey_smart(&mut handle, &username, key_pair).await {
-                    Ok(r) => r,
-                    Err(msg) => {
-                        emit_progress(3, "error", &msg, true);
-                        return Err(msg);
-                    }
-                }
+        // Keyboard-interactive (2FA codes etc.) is asked through the UI here
+        // when the server wants more than the stored password or key.
+        match authenticate(&mut handle, &username, &auth, &format!("{username}@{address}")).await {
+            Ok(true) => {}
+            Ok(false) => {
+                let msg = "Authentication rejected by server".to_string();
+                emit_progress(3, "error", &msg, true);
+                return Err(msg);
             }
-        };
-
-        if !authenticated.success() {
-            let msg = "Authentication rejected by server".to_string();
-            emit_progress(3, "error", &msg, true);
-            return Err(msg);
+            Err(msg) => {
+                emit_progress(3, "error", &msg, true);
+                return Err(msg);
+            }
         }
 
         self.check_cancelled(&session_id).await?;
@@ -830,36 +892,18 @@ impl SessionManager {
             }
         });
 
-        // Spawn OS detection in the background via a separate exec channel.
-        // Only runs when host_id is provided and not proxied via a jump host
-        // (targets behind a bastion are on private subnets, unreachable directly).
-        // Fires-and-forgets: any failure is silently ignored — it never
-        // affects the primary PTY channel or the session itself.
+        // Detect the OS over this same connection (a second exec channel): no
+        // extra login — which would ask for a 2FA code again — and it works
+        // behind jump hosts too. Fire-and-forget; failures are ignored.
         if let Some(hid) = host_id {
-            if !has_jump {
-                let app_for_os = app.clone();
-                let db_for_os = db.clone();
-                let addr_for_os = address.clone();
-                let port_for_os = port;
-                let user_for_os = username.clone();
-                let auth_for_os = auth.clone();
-                tokio::spawn(async move {
-                    // Small delay so the interactive shell can fully initialise
-                    // before we open a second channel (avoids race conditions on
-                    // slower servers).
-                    tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
-                    detect_os_via_exec(
-                        &app_for_os,
-                        db_for_os,
-                        addr_for_os,
-                        port_for_os,
-                        user_for_os,
-                        auth_for_os,
-                        hid,
-                    )
-                    .await;
-                });
-            }
+            let app_for_os = app.clone();
+            let db_for_os = db.clone();
+            let session_for_os = Arc::downgrade(&session);
+            tokio::spawn(async move {
+                // Let the interactive shell settle before opening a second channel.
+                tokio::time::sleep(Duration::from_millis(800)).await;
+                detect_os_via_exec(&app_for_os, db_for_os, session_for_os, hid).await;
+            });
         }
 
         Ok(())
@@ -1009,46 +1053,14 @@ pub fn parse_os_release(output: &str) -> Option<String> {
 /// Open a fresh exec channel (not reusing the interactive PTY) and run
 /// `cat /etc/os-release`.  Returns the detected distro slug, or `None`
 /// on any failure — this never propagates errors to the caller.
-pub async fn detect_os_via_exec(
-    app: &AppHandle,
-    db: Arc<Database>,
-    address: String,
-    port: u16,
-    username: String,
-    auth: SshAuth,
-    host_id: String,
-) {
-    let result: Result<Option<String>, String> = async {
-        let config = default_client_config();
-        let handler = SshClientHandler {
-            address: address.clone(),
-            port,
-            db: db.clone(),
-            forwarded_tcpip: None,
-        };
-        let mut handle = russh::client::connect(config, (address.as_str(), port), handler)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let authenticated = match auth {
-            SshAuth::Password(password) => handle
-                .authenticate_password(&username, &password)
-                .await
-                .map_err(|e| e.to_string())?,
-            SshAuth::PrivateKey { pem, passphrase } => {
-                let key_pair = russh::keys::decode_secret_key(&pem, passphrase.as_deref())
-                    .map_err(|e| e.to_string())?;
-                authenticate_publickey_smart(&mut handle, &username, key_pair)
-                    .await
-                    .map_err(|e| e.to_string())?
-            }
-        };
-
-        if !authenticated.success() {
-            return Ok(None);
-        }
-
-        let channel = handle
+/// Read `/etc/os-release` over an existing session (a separate exec channel)
+/// and store the distro icon for the host.
+pub async fn detect_os_via_exec(app: &AppHandle, db: Arc<Database>, session: Weak<SshSession>, host_id: String) {
+    // The tab may already be closed.
+    let Some(session) = session.upgrade() else { return };
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut channel = session
+            .handle
             .channel_open_session()
             .await
             .map_err(|e| e.to_string())?;
@@ -1058,27 +1070,27 @@ pub async fn detect_os_via_exec(
             .map_err(|e| e.to_string())?;
 
         let mut output = String::new();
-        let mut ch = channel;
         loop {
-            match ch.wait().await {
+            match channel.wait().await {
                 Some(russh::ChannelMsg::Data { ref data }) => {
                     output.push_str(&String::from_utf8_lossy(data));
                     if output.len() > 8192 {
                         break;
                     }
                 }
-                Some(russh::ChannelMsg::Eof)
-                | Some(russh::ChannelMsg::Close)
-                | None => break,
+                Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => break,
                 _ => {}
             }
         }
-        let _ = handle.disconnect(Disconnect::ByApplication, "", "en").await;
-        Ok(parse_os_release(&output))
-    }
+        // The channel isn't closed from our side: the server closes it when
+        // the command exits (closing first can race with its late window
+        // adjusts, which makes russh 0.50 drop the whole connection).
+        Ok::<_, String>(parse_os_release(&output))
+    })
     .await;
+    drop(session);
 
-    if let Ok(Some(slug)) = result {
+    if let Ok(Ok(Some(slug))) = result {
         if let Ok(()) = db.update_host_os_icon(&host_id, &slug) {
             let _ = app.emit(
                 "host-os-detected",
