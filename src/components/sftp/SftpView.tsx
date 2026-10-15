@@ -192,7 +192,7 @@ export function SftpView() {
               placeholder="Select a host to connect..."
               options={[
                 { value: "", label: "Select a host to connect..." },
-                ...hosts.map((h) => ({
+                ...hosts.filter((h) => h.protocol !== "vnc").map((h) => ({
                   value: h.id,
                   label: h.label,
                   description: `(${h.username}@${h.address})`,

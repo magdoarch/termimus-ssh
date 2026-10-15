@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface Host {
   id: string;
@@ -7,15 +7,39 @@ export interface Host {
   address: string;
   port: number;
   username: string;
-  auth_method: "password" | "private_key" | "agent";
+  auth_method: HostAuthMethod;
   credential_id?: string | null;
   tags: string[];
   last_connected_at?: string | null;
   os_icon?: string | null;
   jump_host_id?: string | null;
+  /** Connection protocol; hosts saved before v0.8 have "ssh" */
+  protocol: HostProtocol;
+  /** JSON-encoded protocol options, e.g. VncOptions */
+  protocol_options?: string | null;
   created_at: string;
   updated_at: string;
 }
+
+export type HostProtocol = "ssh" | "vnc";
+/** "none" is only valid for VNC servers without authentication */
+export type HostAuthMethod = "password" | "private_key" | "agent" | "none";
+
+/** Stored in Host.protocol_options for VNC hosts */
+export interface VncOptions {
+  viewOnly?: boolean;
+  /** Ask the server to disconnect other viewers */
+  exclusive?: boolean;
+}
+
+export const DEFAULT_PORTS: Record<HostProtocol, number> = { ssh: 22, vnc: 5900 };
+
+/** Input forwarded to a remote desktop session (see src-tauri/src/remote/input.rs) */
+export type RemoteInputEvent =
+  | { type: "key"; keysym: number; down: boolean }
+  | { type: "pointer"; x: number; y: number; buttons: number }
+  | { type: "clipboard"; text: string }
+  | { type: "refresh" };
 
 export interface HostInput {
   folder_id?: string | null;
@@ -23,13 +47,15 @@ export interface HostInput {
   address: string;
   port: number;
   username: string;
-  auth_method: "password" | "private_key" | "agent";
+  auth_method: HostAuthMethod;
   credential_id?: string | null;
   secret?: string;
   passphrase?: string;
   tags: string[];
   os_icon?: string | null;
   jump_host_id?: string | null;
+  protocol: HostProtocol;
+  protocol_options?: string | null;
 }
 
 export interface KeychainItem {
@@ -399,6 +425,15 @@ export const api = {
       serverUrl,
       authToken: authToken?.trim() || null,
     }),
+  // Remote desktop (VNC). Frames arrive on `onFrame` as binary batches
+  // decoded by src/lib/remoteFrame.ts.
+  remoteConnect: (hostId: string, sessionId: string, onFrame: Channel<ArrayBuffer>) =>
+    invoke<void>("remote_connect", { hostId, sessionId, onFrame }),
+  remoteInput: (sessionId: string, events: RemoteInputEvent[]) =>
+    invoke<void>("remote_input", { sessionId, events }),
+  remoteDisconnect: (sessionId: string) =>
+    invoke<void>("remote_disconnect", { sessionId }),
+
   // Sync auth token + E2EE passphrase, kept in the OS keyring
   syncSecretsSave: (authToken: string, syncPassword: string) =>
     invoke<void>("sync_secrets_save", { authToken, syncPassword }),

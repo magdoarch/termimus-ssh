@@ -5,6 +5,8 @@ import {
   ShieldCheck,
   KeyRound,
   Terminal as TerminalIcon,
+  Monitor,
+  Route,
   AlertCircle,
   RotateCw,
   Pencil,
@@ -34,9 +36,26 @@ interface ConnectionProgressProps {
   error: string | null;
   onRetry: () => void;
   onClose: () => void;
+  /** Selects the stage labels; defaults to SSH */
+  protocol?: "ssh" | "vnc";
 }
 
+const SSH_STAGES = [
+  { step: 1, label: "Socket", icon: Plug },
+  { step: 2, label: "Host Key", icon: ShieldCheck },
+  { step: 3, label: "Auth", icon: KeyRound },
+  { step: 4, label: "Shell", icon: TerminalIcon },
+];
+
+const VNC_STAGES = [
+  { step: 1, label: "Socket", icon: Plug },
+  { step: 2, label: "Tunnel", icon: Route },
+  { step: 3, label: "Auth", icon: KeyRound },
+  { step: 4, label: "Display", icon: Monitor },
+];
+
 export function ConnectionProgress({
+  protocol = "ssh",
   host,
   logs,
   currentStep,
@@ -104,12 +123,7 @@ export function ConnectionProgress({
     }
   }, [currentStep, isFailed]);
 
-  const stages = [
-    { step: 1, label: "Socket", icon: Plug },
-    { step: 2, label: "Host Key", icon: ShieldCheck },
-    { step: 3, label: "Auth", icon: KeyRound },
-    { step: 4, label: "Shell", icon: TerminalIcon },
-  ];
+  const stages = protocol === "vnc" ? VNC_STAGES : SSH_STAGES;
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0d1117] p-6 text-[var(--text-primary)] select-none">

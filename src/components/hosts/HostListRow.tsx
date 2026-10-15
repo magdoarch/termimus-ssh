@@ -88,6 +88,14 @@ export const HostListRow = memo(function HostListRow({
         <span className="truncate text-xs font-semibold text-[var(--text-primary)] group-hover:text-[var(--primary)] transition-colors">
           {host.label}
         </span>
+        {host.protocol === "vnc" && (
+          <span
+            className="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono font-medium bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30"
+            title="VNC remote desktop"
+          >
+            vnc
+          </span>
+        )}
         {host.jump_host_id && (
           <span
             className="shrink-0 px-1 py-0.2 rounded text-[9px] font-mono font-medium bg-[var(--surface-high)] text-[var(--text-muted)] border border-[var(--border)]"
@@ -108,7 +116,7 @@ export const HostListRow = memo(function HostListRow({
       {/* 4. Column: Username */}
       <div className="hidden sm:block w-24 md:w-32 shrink-0 min-w-0">
         <span className="block truncate font-mono text-[11px] text-[var(--text-secondary)]">
-          {host.username}
+          {host.protocol === "vnc" ? "—" : host.username}
         </span>
       </div>
 
@@ -135,14 +143,16 @@ export const HostListRow = memo(function HostListRow({
 
       {/* 6. Column: Quick Action buttons + 3-dots menu */}
       <div className="flex items-center gap-1 shrink-0 ml-auto" onClick={(e) => e.stopPropagation()}>
-        {/* Quick action: SFTP */}
-        <button
-          onClick={(e) => onSftp(e, host)}
-          title="SFTP Browser"
-          className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-white transition"
-        >
-          <FolderOpen size={13} />
-        </button>
+        {/* Quick action: SFTP (SSH hosts only) */}
+        {host.protocol !== "vnc" && (
+          <button
+            onClick={(e) => onSftp(e, host)}
+            title="SFTP Browser"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-white transition"
+          >
+            <FolderOpen size={13} />
+          </button>
+        )}
 
         {/* Options 3-dots */}
         <div className="relative shrink-0">
@@ -164,19 +174,21 @@ export const HostListRow = memo(function HostListRow({
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition"
               >
                 <Terminal size={13} />
-                <span>Connect SSH</span>
+                <span>{host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
               </button>
 
-              <button
-                onClick={(e) => {
-                  onToggleMenu(host.id);
-                  onSftp(e, host);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-high)] transition"
-              >
-                <FolderOpen size={13} />
-                <span>SFTP Files</span>
-              </button>
+              {host.protocol !== "vnc" && (
+                <button
+                  onClick={(e) => {
+                    onToggleMenu(host.id);
+                    onSftp(e, host);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-high)] transition"
+                >
+                  <FolderOpen size={13} />
+                  <span>SFTP Files</span>
+                </button>
+              )}
 
               <button
                 onClick={() => {

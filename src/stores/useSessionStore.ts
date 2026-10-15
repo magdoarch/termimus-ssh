@@ -18,6 +18,7 @@ import {
   updateSplitRatio,
 } from "../lib/layoutTree";
 import { disposeTerminalSession } from "../components/terminal/XtermView";
+import { disposeRemoteSession } from "../components/remote/remoteSessionPool";
 import { getPaneCountForLayout, PresetLayoutType } from "./useWorkspaceStore";
 
 const textEncoder = new TextEncoder();
@@ -31,6 +32,25 @@ export interface SshTab {
   connecting: boolean;
   error?: string;
   isLocal?: boolean;
+  /** "vnc" for remote desktop tabs; undefined means an SSH or local terminal */
+  protocol?: "vnc";
+}
+
+/** Tabs backed by a shell (SSH or local PTY) that accept typed text. */
+export const isTerminalTab = (tab: SshTab | undefined) => Boolean(tab) && tab!.protocol !== "vnc";
+
+/** Tab shown for a saved host: an SSH terminal or a VNC remote desktop. */
+function tabForHost(sessionId: string, host: Host): SshTab {
+  const isVnc = host.protocol === "vnc";
+  return {
+    id: sessionId,
+    hostId: host.id,
+    hostLabel: host.label,
+    hostAddress: isVnc ? `${host.address}:${host.port}` : `${host.username}@${host.address}`,
+    connected: false,
+    connecting: true,
+    ...(isVnc ? { protocol: "vnc" as const } : {}),
+  };
 }
 
 export type DropZone = "left" | "right" | "top" | "bottom" | "center";
@@ -162,14 +182,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   openSession: async (host: Host, newGroup = true) => {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const newTab: SshTab = {
-      id: sessionId,
-      hostId: host.id,
-      hostLabel: host.label,
-      hostAddress: `${host.username}@${host.address}`,
-      connected: false,
-      connecting: true,
-    };
+    const newTab = tabForHost(sessionId, host);
 
     set((state) => {
       // If newGroup is requested (e.g. from HostList / Header + button) or no groups exist:
@@ -226,14 +239,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     side: "first" | "second" = "second"
   ) => {
     const sessionId = `session-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const newTab: SshTab = {
-      id: sessionId,
-      hostId: host.id,
-      hostLabel: host.label,
-      hostAddress: `${host.username}@${host.address}`,
-      connected: false,
-      connecting: true,
-    };
+    const newTab = tabForHost(sessionId, host);
 
     set((state) => {
       // Fallback: If no group exists yet, create initial group
@@ -451,14 +457,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
     const sessionEntries = placed.map((n, idx) => {
       const sessionId = `session-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 7)}`;
-      const tab: SshTab = {
-        id: sessionId,
-        hostId: n.host.id,
-        hostLabel: n.host.label,
-        hostAddress: `${n.host.username}@${n.host.address}`,
-        connected: false,
-        connecting: true,
-      };
+      const tab = tabForHost(sessionId, n.host);
       return { sessionId, tab };
     });
 
@@ -588,16 +587,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       };
     });
 
-    // 2. Clean up xterm instance & Tauri event listeners
+    // 2. Clean up the xterm / remote desktop view & Tauri event listeners
     try {
-      disposeTerminalSession(sessionId);
+      if (tabToClose?.protocol === "vnc") {
+        disposeRemoteSession(sessionId);
+      } else {
+        disposeTerminalSession(sessionId);
+      }
     } catch (e) {
-      console.warn("Failed to dispose xterm instance:", e);
+      console.warn("Failed to dispose session view:", e);
     }
 
-    // 3. Disconnect SSH / Local backend
+    // 3. Disconnect SSH / VNC / Local backend
     try {
-      if (tabToClose?.isLocal || sessionId.startsWith("local-")) {
+      if (tabToClose?.protocol === "vnc") {
+        await api.remoteDisconnect(sessionId);
+      } else if (tabToClose?.isLocal || sessionId.startsWith("local-")) {
         await api.killLocalPty(sessionId);
       } else {
         await api.disconnectSsh(sessionId);
@@ -882,10 +887,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const leafPanes = getAllLeafPanes(group.rootPane);
     const activeLeafTabIds = leafPanes.map((l) => l.activeTabId);
 
-    // 4. Filter only connected sessions
+    // 4. Filter only connected terminal sessions (remote desktops can't take typed text)
     const connectedTargets = activeLeafTabIds.filter((tid) => {
       const tab = tabs.find((t) => t.id === tid);
-      return tab && tab.connected;
+      return tab && tab.connected && isTerminalTab(tab);
     });
 
     return connectedTargets.length > 0 ? connectedTargets : [sessionId];
@@ -894,7 +899,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   sendTextToActiveSession: async (text: string) => {
     const { activeTabId, tabs, getBroadcastTargetSessionIds } = get();
     const activeTab = tabs.find((t) => t.id === activeTabId);
-    if (!activeTabId || !activeTab || !activeTab.connected) {
+    if (!activeTabId || !activeTab || !activeTab.connected || !isTerminalTab(activeTab)) {
       return false;
     }
     const payload = text.endsWith("\n") ? text : `${text}\n`;
@@ -917,7 +922,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   ) => {
     const { activeTabId, tabs, activeGroupId, groups, getBroadcastTargetSessionIds } = get();
     const activeTab = tabs.find((t) => t.id === activeTabId);
-    if (!activeTabId || !activeTab || !activeTab.connected) {
+    if (!activeTabId || !activeTab || !activeTab.connected || !isTerminalTab(activeTab)) {
       return { ok: false, count: 0, targets: [] };
     }
 
@@ -936,7 +941,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           .map((l) => l.activeTabId)
           .filter((tid) => {
             const t = tabs.find((tab) => tab.id === tid);
-            return t && t.connected;
+            return t && t.connected && isTerminalTab(t);
           });
       }
       if (targetSessionIds.length === 0) {

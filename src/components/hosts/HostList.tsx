@@ -278,6 +278,8 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
   const handleSftpClick = useCallback(
     async (e: React.MouseEvent, host: Host) => {
       e.stopPropagation();
+      // SFTP needs an SSH server; VNC hosts have no file transfer.
+      if (host.protocol === "vnc") return;
       if (!useVaultStore.getState().isUnlocked) {
         useVaultStore.getState().openUnlockPrompt();
         return;
@@ -723,7 +725,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
               >
                 <Terminal size={13} />
-                <span>Connect SSH</span>
+                <span>{contextMenu.host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
               </button>
 
               {/* Split Right */}
@@ -752,17 +754,19 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
 
               <div className="my-1 h-[1px] bg-[var(--border)]" />
 
-              {/* SFTP Browser */}
-              <button
-                onClick={(e) => {
-                  handleSftpClick(e, contextMenu.host!);
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
-              >
-                <FolderOpen size={13} />
-                <span>SFTP Files</span>
-              </button>
+              {/* SFTP Browser (SSH hosts only) */}
+              {contextMenu.host.protocol !== "vnc" && (
+                <button
+                  onClick={(e) => {
+                    handleSftpClick(e, contextMenu.host!);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <FolderOpen size={13} />
+                  <span>SFTP Files</span>
+                </button>
+              )}
 
               {/* Port Forwarding */}
               <button
@@ -1097,7 +1101,7 @@ const HostCard = memo(function HostCard({
             )}
           </div>
           <p className="truncate text-xs text-[var(--text-muted)] font-mono mt-0.5">
-            ssh, {host.username}
+            {host.protocol === "vnc" ? "vnc, remote desktop" : `ssh, ${host.username}`}
           </p>
         </div>
       </div>
@@ -1123,19 +1127,21 @@ const HostCard = memo(function HostCard({
               className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition"
             >
               <Terminal size={13} />
-              <span>Connect SSH</span>
+              <span>{host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
             </button>
 
-            <button
-              onClick={(e) => {
-                onToggleMenu(host.id);
-                onSftp(e, host);
-              }}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-high)] transition"
-            >
-              <FolderOpen size={13} />
-              <span>SFTP Files</span>
-            </button>
+            {host.protocol !== "vnc" && (
+              <button
+                onClick={(e) => {
+                  onToggleMenu(host.id);
+                  onSftp(e, host);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-high)] transition"
+              >
+                <FolderOpen size={13} />
+                <span>SFTP Files</span>
+              </button>
+            )}
 
             <button
               onClick={() => {
