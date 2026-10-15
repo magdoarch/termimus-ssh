@@ -35,6 +35,7 @@ import { useLiveSync } from "./hooks/useLiveSync";
 import { useSettingsStore } from "./stores/useSettingsStore";
 import { applyAppTheme } from "./lib/appTheme";
 import { api } from "./lib/api";
+import { loadSavedTabs, saveOpenTabs } from "./lib/tabRestore";
 
 // Helper component for native-feel stacked views:
 // Keeps views mounted in the DOM once visited, switching visibility in 0ms
@@ -103,6 +104,41 @@ function App() {
   useEffect(() => {
     applyAppTheme(appTheme);
   }, [appTheme]);
+
+  // Remember the open tabs for "Reopen tabs at startup".
+  useEffect(
+    () =>
+      useSessionStore.subscribe((state, previous) => {
+        if (state.tabs !== previous.tabs) saveOpenTabs(state.tabs);
+      }),
+    []
+  );
+
+  // Reopen last session's tabs once the vault is open and hosts are loaded.
+  const hostsLoaded = useHostStore((s) => s.hosts.length > 0);
+  const restoredTabs = useRef(false);
+  useEffect(() => {
+    if (!isUnlocked || restoredTabs.current) return;
+    const saved = loadSavedTabs();
+    if (!useSettingsStore.getState().restoreTabs || saved.length === 0) {
+      restoredTabs.current = true;
+      return;
+    }
+    if (saved.some((t) => t.hostId) && !hostsLoaded) return;
+    restoredTabs.current = true;
+    const { hosts } = useHostStore.getState();
+    const sessions = useSessionStore.getState();
+    (async () => {
+      for (const tab of saved) {
+        if (tab.local) {
+          await sessions.openLocalSession(true);
+          continue;
+        }
+        const host = hosts.find((h) => h.id === tab.hostId);
+        if (host) await sessions.openSession(host, true, { command: tab.command, label: tab.label });
+      }
+    })();
+  }, [isUnlocked, hostsLoaded]);
 
   // The backend shares connections unless told otherwise (Settings > SSH & Sessions).
   useEffect(() => {

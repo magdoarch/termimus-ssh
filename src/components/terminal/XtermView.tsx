@@ -10,6 +10,7 @@ import { openExternalUrl } from "../../lib/openUrl";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 import { usePasteConfirmStore } from "../../stores/usePasteConfirmStore";
 import { useHostPanelStore } from "../../stores/useHostPanelStore";
+import { useReconnectStore, type ReconnectStatus } from "../../stores/useReconnectStore";
 import {
   Copy,
   Clipboard,
@@ -83,6 +84,133 @@ const terminalPool = new Map<string, TerminalSessionEntry>();
 
 function notifyConnectionChange(sessionId: string) {
   terminalPool.get(sessionId)?.connectionListeners.forEach((fn) => fn());
+}
+
+// ── Automatic reconnect ─────────────────────────────────────────────────────
+// When an SSH tab's connection drops (not after `exit`), the tab stays open
+// with its scrollback and logs in again on the same session id. Timers live
+// here, outside React, so they survive split/drag remounts.
+
+/** Seconds to wait before each attempt. */
+const RECONNECT_DELAYS = [1, 2, 5, 10, 15, 30, 30, 30, 30, 30];
+const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Stop reconnecting a tab (closed, reconnected or given up). */
+export function cancelReconnect(sessionId: string) {
+  const timer = reconnectTimers.get(sessionId);
+  if (timer) clearTimeout(timer);
+  reconnectTimers.delete(sessionId);
+  useReconnectStore.getState().clear(sessionId);
+}
+
+function scheduleReconnect(sessionId: string, hostId: string, attempt: number, error: string | null) {
+  // A login prompt the user cancelled means: not now.
+  if (attempt >= RECONNECT_DELAYS.length || error?.toLowerCase().includes("cancelled")) {
+    cancelReconnect(sessionId);
+    const message = error ?? "Connection lost";
+    const entry = terminalPool.get(sessionId);
+    if (entry) {
+      entry.hasConnected = false;
+      entry.connectionError = message;
+    }
+    useSessionStore.getState().setSessionError(sessionId, message);
+    notifyConnectionChange(sessionId);
+    return;
+  }
+  const delay = RECONNECT_DELAYS[attempt] * 1000;
+  useReconnectStore.getState().set(sessionId, {
+    hostId,
+    attempt: attempt + 1,
+    maxAttempts: RECONNECT_DELAYS.length,
+    at: Date.now() + delay,
+    error,
+  });
+  const previous = reconnectTimers.get(sessionId);
+  if (previous) clearTimeout(previous);
+  reconnectTimers.set(
+    sessionId,
+    setTimeout(() => void attemptReconnect(sessionId, hostId, attempt), delay)
+  );
+}
+
+async function attemptReconnect(sessionId: string, hostId: string, attempt: number) {
+  reconnectTimers.delete(sessionId);
+  const entry = terminalPool.get(sessionId);
+  const tab = useSessionStore.getState().tabs.find((t) => t.id === sessionId);
+  const status = useReconnectStore.getState().pending[sessionId];
+  if (!entry || !tab || !status) {
+    cancelReconnect(sessionId);
+    return;
+  }
+  useReconnectStore.getState().set(sessionId, { ...status, at: Date.now() });
+  try {
+    await api.connectSsh(hostId, sessionId, entry.lastSize.cols, entry.lastSize.rows, tab.command);
+    cancelReconnect(sessionId);
+    entry.term.write("\r\n\x1b[32m[Reconnected]\x1b[0m\r\n");
+    useSessionStore.getState().setSessionConnected(sessionId, true);
+  } catch (e) {
+    // Closed while the attempt ran: nothing more to do.
+    if (!terminalPool.has(sessionId) || !useReconnectStore.getState().pending[sessionId]) return;
+    scheduleReconnect(sessionId, hostId, attempt + 1, String(e));
+  }
+}
+
+/** Skip the wait (banner button, network back). */
+export function reconnectNow(sessionId: string) {
+  const status = useReconnectStore.getState().pending[sessionId];
+  const timer = reconnectTimers.get(sessionId);
+  // No timer: an attempt is already running.
+  if (!status || !timer) return;
+  clearTimeout(timer);
+  void attemptReconnect(sessionId, status.hostId, status.attempt - 1);
+}
+
+function beginReconnect(sessionId: string, hostId: string) {
+  terminalPool.get(sessionId)?.term.write("\r\n\x1b[33m[Connection lost - reconnecting...]\x1b[0m\r\n");
+  useSessionStore.getState().setSessionConnected(sessionId, false);
+  scheduleReconnect(sessionId, hostId, 0, null);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    Object.keys(useReconnectStore.getState().pending).forEach(reconnectNow);
+  });
+}
+
+/** "Connection lost. Reconnecting in 5s (attempt 3 of 10)" with buttons. */
+function ReconnectBanner({
+  status,
+  onNow,
+  onClose,
+}: {
+  status: ReconnectStatus;
+  onNow: () => void;
+  onClose: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.ceil((status.at - now) / 1000));
+  return (
+    <div className="absolute left-1/2 top-3 z-30 flex max-w-[90%] -translate-x-1/2 items-center gap-3 rounded-xl border border-[var(--warning)]/40 bg-[var(--surface-high)]/95 px-3.5 py-2 text-xs text-[var(--text-primary)] shadow-xl backdrop-blur-md">
+      <RefreshCw size={13} className={`shrink-0 text-[var(--warning)] ${seconds === 0 ? "animate-spin" : ""}`} />
+      <span className="min-w-0 truncate" title={status.error ?? undefined}>
+        Connection lost.{" "}
+        {seconds > 0 ? `Reconnecting in ${seconds}s` : "Reconnecting"} (attempt {status.attempt} of {status.maxAttempts})
+        {status.error && <span className="text-[var(--text-muted)]"> · {status.error}</span>}
+      </span>
+      {seconds > 0 && (
+        <button type="button" onClick={onNow} className="shrink-0 font-semibold text-[var(--primary)] hover:underline">
+          Now
+        </button>
+      )}
+      <button type="button" onClick={onClose} className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+        Close tab
+      </button>
+    </div>
+  );
 }
 
 // Shared module-level text encoder to prevent GC pressure during high-speed typing
@@ -342,6 +470,7 @@ function bindTerminalShortcuts(
  * Cleanly disposes a terminal session when a tab is explicitly closed.
  */
 export function disposeTerminalSession(sessionId: string) {
+  cancelReconnect(sessionId);
   const entry = terminalPool.get(sessionId);
   if (!entry) return;
 
@@ -396,6 +525,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
 
   const setConnected = useSessionStore((s) => s.setSessionConnected);
   const setError = useSessionStore((s) => s.setSessionError);
+  const reconnectStatus = useReconnectStore((s) => s.pending[sessionId]);
   const closeSession = useSessionStore((s) => s.closeSession);
   const host = useHostStore((s) => s.hosts.find((h) => h.id === hostId));
   const tab = useSessionStore((s) => s.tabs.find((t) => t.id === sessionId));
@@ -730,9 +860,14 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
           term.write(bytes);
         }).then(keepListener);
 
-        listen<string>(`ssh-closed-${sessionId}`, () => {
-          // When connection is closed (e.g. exit or Ctrl+D), immediately close the session/tab
-          closeSession(sessionId);
+        listen<{ lost: boolean; exitStatus: number | null }>(`ssh-closed-${sessionId}`, (event) => {
+          if (event.payload?.lost && useSettingsStore.getState().autoReconnect) {
+            // The connection dropped: keep the tab and log in again.
+            beginReconnect(sessionId, hostId);
+          } else {
+            // The shell ended (exit, Ctrl+D): close the tab.
+            closeSession(sessionId);
+          }
         }).then(keepListener);
 
         listen<SshProgressEvent>(`ssh-progress-${sessionId}`, (event) => {
@@ -749,7 +884,8 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
           if (poolEntry) {
             poolEntry.connectionStep = p.step;
             poolEntry.connectionLogs = [...poolEntry.connectionLogs, newLog];
-            if (p.is_error) {
+            // While reconnecting, failed attempts show in the banner instead.
+            if (p.is_error && !useReconnectStore.getState().pending[sessionId]) {
               poolEntry.connectionError = p.message;
             }
           }
@@ -947,6 +1083,14 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
         backgroundColor: themeBg,
       }}
     >
+      {reconnectStatus && !isLocal && (
+        <ReconnectBanner
+          status={reconnectStatus}
+          onNow={() => reconnectNow(sessionId)}
+          onClose={() => closeSession(sessionId)}
+        />
+      )}
+
       {/* Terminal Viewport */}
       <div
         ref={containerRef}
