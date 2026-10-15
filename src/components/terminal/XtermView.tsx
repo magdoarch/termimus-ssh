@@ -924,13 +924,13 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               setContextMenu(null);
             }}
             disabled={!contextMenu.hasSelection}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors disabled:opacity-40 disabled:pointer-events-none group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors disabled:opacity-40 disabled:pointer-events-none group"
           >
             <div className="flex items-center gap-2">
               <Copy size={13} />
               <span>Copy</span>
             </div>
-            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
               {isMac ? "⌘C" : "Ctrl+Shift+C"}
             </span>
           </button>
@@ -941,13 +941,13 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               if (termRef.current) safePasteToTerminal(termRef.current);
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <Clipboard size={13} />
               <span>Paste</span>
             </div>
-            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
               {isMac ? "⌘V" : "Ctrl+Shift+V"}
             </span>
           </button>
@@ -958,13 +958,13 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               termRef.current?.selectAll();
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <CheckSquare size={13} />
               <span>Select All</span>
             </div>
-            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
               {isMac ? "⌘A" : "Ctrl+Shift+A"}
             </span>
           </button>
@@ -977,13 +977,13 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               setIsSearchOpen(true);
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <Search size={13} />
               <span>Find in Terminal</span>
             </div>
-            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
               {isMac ? "⌘F" : "Ctrl+Shift+F"}
             </span>
           </button>
@@ -994,13 +994,13 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               termRef.current?.clear();
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <Trash2 size={13} />
               <span>Clear Buffer</span>
             </div>
-            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
               {isMac ? "⌘K" : "Ctrl+Shift+K"}
             </span>
           </button>
@@ -1053,7 +1053,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               handleSplitRight();
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <Columns2 size={13} />
@@ -1067,7 +1067,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               handleSplitDown();
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <Rows2 size={13} />
@@ -1083,7 +1083,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
               handleRetry();
               setContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <RefreshCw size={13} />

@@ -630,7 +630,7 @@ export const FilePane = memo(function FilePane({
                   else onOpenFile?.(entry);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 {contextMenu.entry.is_dir ? (
                   <>
@@ -652,7 +652,7 @@ export const FilePane = memo(function FilePane({
                     onTransfer(menuTargets);
                     setContextMenu(null);
                   }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
                 >
                   <ArrowRight size={13} />
                   <span>{transferLabel}</span>
@@ -709,7 +709,7 @@ export const FilePane = memo(function FilePane({
                   setContextMenu(null);
                 }}
                 disabled={disabled}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group disabled:opacity-40 disabled:pointer-events-none"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group disabled:opacity-40 disabled:pointer-events-none"
               >
                 <FolderPlus size={13} />
                 <span>New Folder</span>

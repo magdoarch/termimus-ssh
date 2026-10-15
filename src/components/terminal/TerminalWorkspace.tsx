@@ -147,7 +147,7 @@ export function TerminalWorkspace({ visible, onOpenWorkspaces }: TerminalWorkspa
             {onOpenWorkspaces && (
               <button
                 onClick={onOpenWorkspaces}
-                className="mt-1 flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-3.5 py-2 text-xs font-semibold text-black hover:bg-[var(--primary)]/90 transition-all shadow-sm active:scale-95"
+                className="mt-1 flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-3.5 py-2 text-xs font-semibold text-[var(--on-primary)] hover:bg-[var(--primary)]/90 transition-all shadow-sm active:scale-95"
               >
                 <Layers size={13} />
                 <span>Open Workspaces</span>
@@ -223,7 +223,7 @@ export function TerminalWorkspace({ visible, onOpenWorkspaces }: TerminalWorkspa
                           </span>
                           <button
                             onClick={() => toggleGroupBroadcast(group.id)}
-                            className="flex items-center gap-1 rounded bg-[var(--primary)]/20 px-2 py-0.5 text-xs text-[var(--primary)] hover:bg-[var(--primary)] hover:text-black font-medium transition-colors"
+                            className="flex items-center gap-1 rounded bg-[var(--primary)]/20 px-2 py-0.5 text-xs text-[var(--primary)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] font-medium transition-colors"
                           >
                             <Unlink size={11} />
                             <span>Disconnect</span>

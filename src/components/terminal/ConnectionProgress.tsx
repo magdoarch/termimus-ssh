@@ -203,7 +203,7 @@ export function ConnectionProgress({
                       isCurrentFailed
                         ? "bg-[var(--danger)] text-white ring-4 ring-[var(--danger)]/25"
                         : isCompleted
-                        ? "bg-[var(--primary)] text-black ring-4 ring-[var(--primary)]/20"
+                        ? "bg-[var(--primary)] text-[var(--on-primary)] ring-4 ring-[var(--primary)]/20"
                         : isActive
                         ? "bg-[var(--secondary)] text-white ring-4 ring-[var(--secondary)]/30 shadow-[var(--secondary)]/30"
                         : "bg-[var(--surface-low)] text-[var(--text-muted)] border border-[var(--surface-highest)]"

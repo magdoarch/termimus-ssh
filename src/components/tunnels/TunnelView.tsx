@@ -211,7 +211,7 @@ export function TunnelView() {
                   toggleTunnel(contextMenu.rule!);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 {activeRuleIds.has(contextMenu.rule.id) ? (
                   <>
@@ -294,7 +294,7 @@ export function TunnelView() {
                   openCreateModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Port Forward Rule</span>

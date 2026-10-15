@@ -34,6 +34,7 @@
     --secondary: #38bdf8;
     --tertiary: #cbacff;
     --success: #3fb950;
+    --on-success: #04260f;
     --danger: #f85149;
     --warning: #e3b341;
 
@@ -80,6 +81,7 @@
     --secondary: #0277bd;
     --tertiary: #7c3aed;
     --success: #1a7f37;
+    --on-success: #ffffff;
     --danger: #cf222e;
     --warning: #9a6700;
 

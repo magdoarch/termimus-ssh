@@ -722,7 +722,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                   handleConnect(contextMenu.host!);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Terminal size={13} />
                 <span>{contextMenu.host.protocol === "vnc" ? "Connect VNC" : "Connect SSH"}</span>
@@ -856,7 +856,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                   setSelectedFolderId(contextMenu.folder!.id);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <FolderOpen size={13} />
                 <span>Open Group</span>
@@ -896,7 +896,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                   openCreateModal(selectedFolderId ?? undefined);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Host</span>

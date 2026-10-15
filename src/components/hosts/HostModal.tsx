@@ -683,7 +683,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                             onClick={() => handleCopyPublicKey(selectedKeyItem.public_key)}
                             className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                               copied
-                                ? "bg-[var(--success)] text-black"
+                                ? "bg-[var(--success)] text-[var(--on-success)]"
                                 : "bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)]"
                             }`}
                           >

@@ -256,7 +256,7 @@ export function SnippetView() {
                   setContextMenu(null);
                 }}
                 disabled={!hasActiveTerminal}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group disabled:opacity-40 disabled:pointer-events-none"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group disabled:opacity-40 disabled:pointer-events-none"
               >
                 <Play size={13} />
                 <span>Run in Active Terminal</span>
@@ -311,7 +311,7 @@ export function SnippetView() {
                   openCreateModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Snippet</span>

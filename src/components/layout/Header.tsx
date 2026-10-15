@@ -572,7 +572,7 @@ export function Header({
               {/* Duplicate Tab */}
               <button
                 onClick={handleDuplicateTab}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <div className="flex items-center gap-2">
                   <CopyPlus size={13} />
@@ -583,7 +583,7 @@ export function Header({
               {/* Split Screen Right */}
               <button
                 onClick={handleSplitRightTab}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <div className="flex items-center gap-2">
                   <Columns2 size={13} />
@@ -594,7 +594,7 @@ export function Header({
               {/* Split Screen Down */}
               <button
                 onClick={handleSplitDownTab}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <div className="flex items-center gap-2">
                   <Rows2 size={13} />
@@ -605,13 +605,13 @@ export function Header({
               {/* Toggle Input Broadcast Sync */}
               <button
                 onClick={handleToggleBroadcast}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <div className="flex items-center gap-2">
                   <Radio size={13} className={isTargetBroadcast ? "animate-pulse" : ""} />
                   <span>{isTargetBroadcast ? "Disconnect Input Sync" : "Sync All Panes"}</span>
                 </div>
-                <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+                <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
                   Alt+B
                 </span>
               </button>
@@ -665,13 +665,13 @@ export function Header({
               setIsQuickConnectOpen(true);
               setTabContextMenu(null);
             }}
-            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+            className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
           >
             <div className="flex items-center gap-2">
               <Plus size={13} />
               <span>New Connection</span>
             </div>
-            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-black/70">
+            <span className="text-[10px] font-mono text-[var(--text-muted)] group-hover:text-[var(--on-primary)]/70">
               {isMac ? "⌘K" : "Ctrl+K"}
             </span>
           </button>

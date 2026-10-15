@@ -216,7 +216,7 @@ export function WorkspaceView({ onOpenTerminal }: WorkspaceViewProps) {
 
             <button
               onClick={() => openCreateModal()}
-              className="flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-black shadow-md transition-all hover:bg-[var(--primary)]/90 hover:scale-[1.02] active:scale-[0.98]"
+              className="flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-[var(--on-primary)] shadow-md transition-all hover:bg-[var(--primary)]/90 hover:scale-[1.02] active:scale-[0.98]"
             >
               <Plus size={14} strokeWidth={2.5} />
               <span>New Preset</span>
@@ -270,7 +270,7 @@ export function WorkspaceView({ onOpenTerminal }: WorkspaceViewProps) {
               <div className="mt-6 flex flex-col items-center gap-3">
                 <button
                   onClick={() => openCreateModal()}
-                  className="flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-black shadow-md hover:bg-[var(--primary)]/90 transition-colors"
+                  className="flex items-center gap-1.5 rounded-xl bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-[var(--on-primary)] shadow-md hover:bg-[var(--primary)]/90 transition-colors"
                 >
                   <Plus size={14} />
                   <span>Create First Preset</span>
@@ -352,7 +352,7 @@ export function WorkspaceView({ onOpenTerminal }: WorkspaceViewProps) {
                   handleLaunchPreset(contextMenu.preset!);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Zap size={13} />
                 <span>Launch Workspace</span>
@@ -412,7 +412,7 @@ export function WorkspaceView({ onOpenTerminal }: WorkspaceViewProps) {
                   openCreateModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Preset</span>
