@@ -56,6 +56,25 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Terminal Interconnection & Input Broadcast**: One-click synchronized input across all split panes (`SYNC` toggle / `Alt+B`) to broadcast keystrokes and run commands simultaneously across multiple servers.
 - **Session Geometry Protection**: Background tabs stay mounted without collapsing to 0×0 geometry, preventing remote `htop`, `vim`, and curses TUIs from corrupting due to bogus SIGWINCH events.
 - **Quick Connect**: Instant fuzzy-search launcher accessible anywhere with `Ctrl+K`.
+- **Resilient Sessions**: A dropped connection reconnects in the same tab with its scrollback intact; optionally reopen last time's tabs at startup.
+- **Session Recording**: Record SSH sessions as asciinema `.cast` files (output only, never keystrokes), replay them in-app with seek and speed controls, or export them.
+- **Safer Pasting & Links**: Ctrl+click opens URLs; text that would run line by line in the shell is shown before it's pasted.
+- **Light & Dark**: Dark, Light or follow-the-system app theme.
+
+### 🔐 Logins, 2FA & Jump Hosts
+- **Two-Factor Login**: Keyboard-interactive prompts (OTP codes, Duo, PAM questions) appear in a dialog; save a host's TOTP secret and the code is filled in for you.
+- **Asked When Needed**: Hosts without a saved password, and keys without a saved passphrase, ask at login instead of failing.
+- **Jump Host Chains**: Reach hosts through any chain of bastions (ProxyJump, up to 8 hops) — for terminals, SFTP, tunnels and remote desktops.
+- **Shared Connections**: Tabs, SFTP panes and tunnels to the same host share one SSH connection (like OpenSSH's ControlMaster), so a password or 2FA code is asked once.
+- **Import `~/.ssh/config`**: Hosts, their keys, ProxyJump chains and the host keys in `~/.ssh/known_hosts` in one step, with a preview first.
+- **Install SSH Keys**: Put a Keychain key into a server's `authorized_keys` (like `ssh-copy-id`) and switch the host to it.
+
+### 🖼️ Remote Desktop
+- **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.
+
+### 📊 Server Dashboard & Docker
+- **Live Server Stats**: CPU (with a one-minute graph), load, memory, swap, disks and network rates over the host's SSH connection.
+- **Docker Containers**: List, start, stop, restart, pause and remove containers, follow their logs, or open a shell inside one.
 
 ### 🗂️ Workspaces & Multi-Server Cluster Launcher
 - **Multi-Server Layout Presets**: Design and save complex multi-terminal split layouts (Single, Vertical 2-way, Horizontal 2-way, 3-way, 4-way Grid, 6-way Matrix) with assigned hosts for each pane.
@@ -80,6 +99,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 ### 📜 Snippets & Scripts
 - **Instant Script Runner**: Store frequently used shell scripts, deployment commands, and system diagnostics.
 - **Active Tab Injection**: Send snippets straight into your running terminal session with a single click.
+- **Variables**: `{{name}}` or `{{name:default}}` placeholders are asked for each time a snippet runs.
 
 ### 🔒 Enterprise-Grade Local Security
 - **Zero-Knowledge Vault**: All passwords and keys are encrypted at rest with **AES-256-GCM** using keys derived via **Argon2id**.
