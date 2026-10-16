@@ -20,6 +20,7 @@ import {
   type SshConfigKeyPreview,
   type SshConfigPreview,
 } from "../../lib/api";
+import { dialogOnTop } from "../../lib/dialogs";
 import { useHostStore } from "../../stores/useHostStore";
 import { useKeychainStore } from "../../stores/useKeychainStore";
 import { useKnownHostsStore } from "../../stores/useKnownHostsStore";
@@ -133,7 +134,7 @@ export function SshConfigImportModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && !importing) onClose();
+      if (e.key === "Escape" && !dialogOnTop() && !importing) onClose();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);

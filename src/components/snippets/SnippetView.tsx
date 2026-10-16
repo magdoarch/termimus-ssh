@@ -122,8 +122,9 @@ export function SnippetView() {
 
   const handleRun = useCallback(
     async (snippetId: string, command: string) => {
-      const title = useSnippetStore.getState().snippets.find((s) => s.id === snippetId)?.title;
-      const filled = await useSnippetVarsStore.getState().fill(command, title);
+      const snippet = useSnippetStore.getState().snippets.find((s) => s.id === snippetId);
+      const secret = Boolean(snippet?.tags.some((t) => t.toLowerCase() === "secret"));
+      const filled = await useSnippetVarsStore.getState().fill(command, snippet?.title, secret);
       if (filled === null) return;
       const ok = await sendTextToActiveSession(filled);
       setRunFeedback({ id: snippetId, ok });

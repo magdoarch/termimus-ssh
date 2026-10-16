@@ -63,6 +63,7 @@ export function HostStatsView({ hostId }: { hostId: string }) {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
+    let started: Promise<unknown> = Promise.resolve();
     setError(null);
     (async () => {
       unlisten = await listen<HostStatsEvent>(`host-stats-${monitorId}`, (event) => {
@@ -82,16 +83,15 @@ export function HostStatsView({ hostId }: { hostId: string }) {
         unlisten();
         return;
       }
-      try {
-        await api.startHostMonitor(hostId, monitorId);
-      } catch (e) {
+      started = api.startHostMonitor(hostId, monitorId).catch((e) => {
         if (!cancelled) setError(String(e));
-      }
+      });
     })();
     return () => {
       cancelled = true;
       unlisten?.();
-      api.stopHostMonitor(monitorId).catch(() => {});
+      // After the start settles, so a stop can't overtake a slow login.
+      started.finally(() => api.stopHostMonitor(monitorId).catch(() => {}));
     };
   }, [hostId, monitorId, attempt]);
 

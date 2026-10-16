@@ -151,7 +151,7 @@ impl Handler for SshClientHandler {
             originator_address: originator_address.to_string(),
             originator_port,
         };
-        let rejected = match self.forwards.sender(connected_port) {
+        let rejected = match self.forwards.sender(connected_address, connected_port) {
             Some(tx) => tx.send(forwarded).err().map(|e| e.0),
             None => Some(forwarded),
         };

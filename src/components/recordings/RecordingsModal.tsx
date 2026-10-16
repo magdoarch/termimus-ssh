@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft, Download, Film, LoaderCircle, Play, Trash2, X } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { dialogOnTop } from "../../lib/dialogs";
 import { api, type RecordingInfo } from "../../lib/api";
 import { formatBytes, formatDate, formatDuration } from "../../lib/format";
 import { useConfirmStore } from "../../stores/useConfirmStore";
@@ -36,7 +37,7 @@ export function RecordingsModal() {
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape" && !dialogOnTop()) close();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);

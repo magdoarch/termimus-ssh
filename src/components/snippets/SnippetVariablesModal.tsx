@@ -21,10 +21,14 @@ export function SnippetVariablesModal() {
   useEffect(() => {
     if (!request) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") finish(null);
+      if (e.key === "Escape") {
+        // Not also un-maximizing the pane behind the dialog.
+        e.stopImmediatePropagation();
+        finish(null);
+      }
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [request, finish]);
 
   if (!request) return null;
@@ -62,9 +66,13 @@ export function SnippetVariablesModal() {
             </div>
           ))}
         </div>
-        <pre className="mt-4 max-h-32 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--canvas)] p-2.5 font-mono text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap break-all">
-          {fillSnippet(request.command, values)}
-        </pre>
+        {request.secret ? (
+          <p className="mt-4 text-[11px] text-[var(--text-muted)]">Preview hidden: this snippet is marked secret.</p>
+        ) : (
+          <pre className="mt-4 max-h-32 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--canvas)] p-2.5 font-mono text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap break-all">
+            {fillSnippet(request.command, values)}
+          </pre>
+        )}
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"

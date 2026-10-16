@@ -503,10 +503,16 @@ fn place(plan: Plan, parent: Option<String>, existing: &[Host], new_hosts: &mut 
             return host.id.clone();
         }
     }
-    if let Some(host) = new_hosts.iter_mut().find(|host| host.plan.same_host(&plan) && host.jump_host_id == parent) {
-        host.picked |= picked;
+    // A jump host is reused by anything reached the same way; a picked alias
+    // takes over a host created as a jump host (with its own key and label),
+    // but two picked aliases stay two hosts.
+    if let Some(host) = new_hosts
+        .iter_mut()
+        .find(|host| host.plan.same_host(&plan) && host.jump_host_id == parent && !(picked && host.picked))
+    {
         if picked {
-            host.plan.label = plan.label;
+            host.plan = plan;
+            host.picked = true;
         }
         return host.id.clone();
     }
@@ -1009,6 +1015,36 @@ Host gone
         let preview = super::preview(&db, &home, None).unwrap();
         assert!(preview.hosts.iter().all(|h| h.jump_identity_files.is_empty()));
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    #[test]
+    fn a_picked_host_keeps_its_own_key_when_it_was_also_a_jump_host() {
+        let f = fixture();
+        let bastion_key = random_key();
+        std::fs::write(
+            f.home.join(".ssh/id_bastion"),
+            bastion_key.to_openssh(LineEnding::LF).unwrap().as_bytes(),
+        )
+        .unwrap();
+        // db's literal jump host is the same machine as the `bastion` alias,
+        // which comes later in the file and has its own key.
+        std::fs::write(
+            f.home.join(".ssh/config"),
+            "Host db\n  HostName 10.0.0.20\n  User postgres\n  IdentityFile ~/.ssh/id_work\n  ProxyJump ops@203.0.113.10\n\
+             Host bastion\n  HostName 203.0.113.10\n  User ops\n  IdentityFile ~/.ssh/id_bastion\n\
+             Host web\n  HostName web.example.com\n  User deploy\n  IdentityFile ~/.ssh/id_work\n\
+             Host web-again\n  HostName web.example.com\n  User deploy\n  IdentityFile ~/.ssh/id_work\n",
+        )
+        .unwrap();
+        let result = import(&f.db, &f.vault, &f.home, &request(&["db", "bastion", "web", "web-again"])).unwrap();
+        assert_eq!((result.hosts_added, result.jump_hosts_added), (4, 0));
+        let hosts = f.db.list_hosts().unwrap();
+        let host = |label: &str| hosts.iter().find(|h| h.label == label).unwrap();
+        assert_eq!(host("db").jump_host_id.as_deref(), Some(host("bastion").id.as_str()));
+        let key = f.db.get_credential(host("bastion").credential_id.as_deref().unwrap()).unwrap().unwrap();
+        assert_eq!(key.fingerprint, fingerprint(&bastion_key));
+        // Two picked aliases for the same user@host stay two hosts.
+        assert_ne!(host("web").id, host("web-again").id);
     }
 
     #[test]

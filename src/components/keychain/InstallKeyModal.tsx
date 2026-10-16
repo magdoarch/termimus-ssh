@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CircleCheck, KeyRound, LoaderCircle, X } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
+import { dialogOnTop } from "../../lib/dialogs";
 import { api, isSshHost, type HostInput } from "../../lib/api";
 import { useHostStore } from "../../stores/useHostStore";
 import { useKeychainStore } from "../../stores/useKeychainStore";
@@ -37,7 +38,7 @@ export function InstallKeyModal() {
   useEffect(() => {
     if (!target) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && status.kind !== "installing") close();
+      if (e.key === "Escape" && !dialogOnTop() && status.kind !== "installing") close();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);

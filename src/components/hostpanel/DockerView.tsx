@@ -73,13 +73,20 @@ function ContainerLogs({
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const preRef = useRef<HTMLPreElement>(null);
+  const fetching = useRef(false);
 
   const load = useCallback(async () => {
+    // One fetch at a time: a slow one must not land after a newer one.
+    if (fetching.current) return;
+    fetching.current = true;
     try {
       setText(await api.dockerLogs(hostId, container.id, tail, sudo));
       setError(null);
     } catch (e) {
       setError(String(e));
+      setFollow(false);
+    } finally {
+      fetching.current = false;
     }
   }, [hostId, container.id, tail, sudo]);
 
@@ -147,6 +154,9 @@ export function DockerView({ hostId }: { hostId: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [logsFor, setLogsFor] = useState<DockerContainer | null>(null);
   const [filter, setFilter] = useState("");
+  // Stops after a failure (e.g. a cancelled login) until Refresh, so the
+  // panel doesn't ask for a password or code again every few seconds.
+  const [polling, setPolling] = useState(true);
   const loading = useRef(false);
 
   const refresh = useCallback(async () => {
@@ -166,16 +176,24 @@ export function DockerView({ hostId }: { hostId: string }) {
       }
     } catch (e) {
       setError(String(e));
+      setPolling(false);
     } finally {
       loading.current = false;
     }
   }, [hostId]);
 
   useEffect(() => {
+    if (!polling) return;
     refresh();
     const timer = setInterval(refresh, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, polling]);
+
+  const refreshNow = () => {
+    setError(null);
+    if (polling) refresh();
+    else setPolling(true);
+  };
 
   async function run(container: DockerContainer, action: DockerAction) {
     setBusy(container.id);
@@ -212,9 +230,18 @@ export function DockerView({ hostId }: { hostId: string }) {
 
   if (containers === null) {
     return (
-      <div className="flex min-h-[240px] items-center justify-center text-xs text-[var(--text-muted)]">
+      <div className="flex min-h-[240px] flex-col items-center justify-center gap-3 text-xs text-[var(--text-muted)]">
         {error ? (
-          <p className="max-w-md text-center text-[var(--danger)]">{error}</p>
+          <>
+            <p className="max-w-md text-center text-[var(--danger)]">{error}</p>
+            <button
+              type="button"
+              onClick={refreshNow}
+              className="flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-high)] px-3 py-1.5 text-[var(--text-primary)] hover:bg-[var(--surface-highest)]"
+            >
+              <RotateCw size={12} /> Try again
+            </button>
+          </>
         ) : (
           <span className="flex items-center gap-2">
             <LoaderCircle size={14} className="animate-spin" /> Asking Docker…
@@ -248,7 +275,7 @@ export function DockerView({ hostId }: { hostId: string }) {
         {error && <span className="text-[var(--danger)]">{error}</span>}
         <button
           type="button"
-          onClick={refresh}
+          onClick={refreshNow}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-high)] px-2.5 py-1 text-[var(--text-primary)] hover:bg-[var(--surface-highest)]"
         >
           <RotateCw size={12} /> Refresh

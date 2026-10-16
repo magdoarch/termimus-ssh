@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Container, Gauge, X } from "lucide-react";
 import { api } from "../../lib/api";
+import { dialogOnTop } from "../../lib/dialogs";
 import { useShallow } from "zustand/react/shallow";
 import { useHostPanelStore, type HostPanelTab } from "../../stores/useHostPanelStore";
 import { useHostStore } from "../../stores/useHostStore";
@@ -23,16 +24,18 @@ export function HostPanel() {
   useEffect(() => {
     if (!hostId) return;
     const leaseId = `panel-${hostId}-${Math.random().toString(36).slice(2, 8)}`;
-    api.holdHostConnection(hostId, leaseId).catch(() => {});
+    const holding = api.holdHostConnection(hostId, leaseId).catch(() => {});
     return () => {
-      api.releaseHostConnection(leaseId).catch(() => {});
+      // After the hold settles: a release that overtakes a slow login would
+      // leave the connection held for good.
+      holding.finally(() => api.releaseHostConnection(leaseId).catch(() => {}));
     };
   }, [hostId]);
 
   useEffect(() => {
     if (!hostId) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape" && !dialogOnTop()) close();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);

@@ -115,21 +115,18 @@ function App() {
     []
   );
 
-  // Reopen last session's tabs once the vault is open and hosts are loaded.
-  const hostsLoaded = useHostStore((s) => s.hosts.length > 0);
+  // Reopen last session's tabs once, when the vault opens: the saved list is
+  // read before anything new is opened, and the hosts are loaded first.
   const restoredTabs = useRef(false);
   useEffect(() => {
     if (!isUnlocked || restoredTabs.current) return;
-    const saved = loadSavedTabs();
-    if (!useSettingsStore.getState().restoreTabs || saved.length === 0) {
-      restoredTabs.current = true;
-      return;
-    }
-    if (saved.some((t) => t.hostId) && !hostsLoaded) return;
     restoredTabs.current = true;
-    const { hosts } = useHostStore.getState();
-    const sessions = useSessionStore.getState();
+    const saved = loadSavedTabs();
+    if (!useSettingsStore.getState().restoreTabs || saved.length === 0) return;
     (async () => {
+      await useHostStore.getState().refresh();
+      const { hosts } = useHostStore.getState();
+      const sessions = useSessionStore.getState();
       for (const tab of saved) {
         if (tab.local) {
           await sessions.openLocalSession(true);
@@ -139,7 +136,7 @@ function App() {
         if (host) await sessions.openSession(host, true, { command: tab.command, label: tab.label });
       }
     })();
-  }, [isUnlocked, hostsLoaded]);
+  }, [isUnlocked]);
 
   // The backend shares connections unless told otherwise (Settings > SSH & Sessions).
   useEffect(() => {

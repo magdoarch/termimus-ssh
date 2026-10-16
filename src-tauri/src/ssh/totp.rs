@@ -58,7 +58,8 @@ impl Totp {
     /// allowed), or an `otpauth://totp/...` URI from the QR code.
     pub fn parse(input: &str) -> Result<Self, String> {
         let input = input.trim();
-        if input.len() >= 10 && input[..10].eq_ignore_ascii_case("otpauth://") {
+        // `get` instead of slicing: input is typed text and may not be ASCII.
+        if input.get(..10).is_some_and(|prefix| prefix.eq_ignore_ascii_case("otpauth://")) {
             return Self::parse_uri(&input[10..]);
         }
         Self::new(input, 6, 30, TotpAlgorithm::Sha1)
@@ -281,6 +282,9 @@ mod tests {
         assert_eq!(again.code_at(1_700_000_000), totp.code_at(1_700_000_000));
 
         assert!(Totp::parse("").is_err());
+        // Non-ASCII around the prefix length is rejected, not a crash.
+        assert!(Totp::parse("abcdefghié").is_err());
+        assert!(Totp::parse("JBSWY3DP\u{2009}EHPK3PXP").is_ok(), "thin-space grouping");
         assert!(Totp::parse("not base32!").is_err());
         assert!(Totp::parse("JBSWY3DP").is_err(), "too short");
         assert!(Totp::parse("otpauth://hotp/x?secret=JBSWY3DPEHPK3PXP&counter=1").is_err());

@@ -18,6 +18,8 @@ export function PasteConfirmModal() {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
+        // Not also un-maximizing the pane behind the dialog.
+        e.stopImmediatePropagation();
         close();
         request?.done();
       }

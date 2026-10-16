@@ -64,11 +64,17 @@ impl HostMonitor {
         monitor_id: String,
         interval: Duration,
     ) -> Result<(), String> {
-        self.stop(&monitor_id).await;
+        // Registered before logging in, so a stop during the login (the
+        // panel closed meanwhile) is seen afterwards.
+        let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+        if let Some(previous) = self.running.lock().await.insert(monitor_id.clone(), stop_tx) {
+            let _ = previous.send(());
+        }
         let quiet = |_: u8, _: &str, _: &str| {};
         let (connection, _) = pool.connect(&db, &route, &quiet).await?;
-        let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
-        self.running.lock().await.insert(monitor_id.clone(), stop_tx);
+        if !matches!(stop_rx.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
+            return Ok(());
+        }
         let interval = interval.max(MIN_INTERVAL);
         let event = format!("host-stats-{monitor_id}");
         tokio::spawn(async move {

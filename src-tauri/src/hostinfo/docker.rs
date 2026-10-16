@@ -164,12 +164,17 @@ async fn docker(connection: &SshConnection, args: &str, sudo: Option<bool>) -> R
     }
     let output = exec(connection, &format!("sudo -n docker {args}")).await?;
     if output.exit_status == Some(0) {
-        Ok((output.stdout_text(), true))
+        return Ok((output.stdout_text(), true));
+    }
+    let stderr = output.stderr_text();
+    let message = stderr.trim();
+    // sudo itself refused (needs a password, not allowed): a permission
+    // problem. Otherwise it's Docker's own error, e.g. a port in use.
+    if message.is_empty() || message.starts_with("sudo:") || message.contains("password is required") {
+        Err("This user can't use Docker: add it to the docker group, or allow `sudo docker` without a password."
+            .to_string())
     } else {
-        Err(
-            "This user can't use Docker: add it to the docker group, or allow `sudo docker` without a password."
-                .to_string(),
-        )
+        Err(message.to_string())
     }
 }
 

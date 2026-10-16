@@ -98,6 +98,11 @@ function notifyConnectionChange(sessionId: string) {
 const RECONNECT_DELAYS = [1, 2, 5, 10, 15, 30, 30, 30, 30, 30];
 const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/** An automatic attempt is connecting right now (not waiting on its timer). */
+function reconnectInFlight(sessionId: string) {
+  return Boolean(useReconnectStore.getState().pending[sessionId]) && !reconnectTimers.has(sessionId);
+}
+
 /** Stop reconnecting a tab (closed, reconnected or given up). */
 export function cancelReconnect(sessionId: string) {
   const timer = reconnectTimers.get(sessionId);
@@ -305,12 +310,18 @@ let lastPastedContent = "";
  * Paste into the terminal (xterm wraps it for bracketed paste when the remote
  * side asked for that). Text with line breaks going into a shell that would
  * run each line right away is confirmed first (Settings > SSH & Sessions).
+ *
+ * Control characters are dropped first: xterm passes them through, and an ESC
+ * in the clipboard could end a bracketed paste early (`ESC[201~`) so the rest
+ * runs at once ("pastejacking").
  */
 function pasteText(term: Terminal, text: string) {
-  const normalized = text.replace(/\r\n?/g, "\n");
+  // Keep tabs and line breaks; drop other C0 controls, DEL and C1 controls.
+  const clean = text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
+  const normalized = clean.replace(/\r\n?/g, "\n");
   const runsLines = normalized.includes("\n") && !term.modes.bracketedPasteMode;
   if (!runsLines || !useSettingsStore.getState().confirmMultilinePaste) {
-    term.paste(text);
+    term.paste(clean);
     return;
   }
   usePasteConfirmStore.getState().ask({
@@ -659,6 +670,11 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
           });
         return;
       }
+
+      // A manual (re)connect replaces an automatic one waiting to run; one
+      // that is already connecting is left to finish.
+      if (reconnectInFlight(sessionId)) return;
+      cancelReconnect(sessionId);
 
       const initialLog: ConnectionLog = {
         step: 1,

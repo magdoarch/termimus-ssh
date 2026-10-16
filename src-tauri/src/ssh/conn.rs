@@ -63,26 +63,37 @@ pub type Route = Vec<Hop>;
 pub type Progress<'a> = &'a (dyn Fn(u8, &str, &str) + Sync);
 
 /// Channels the server opens for remote forwards (`ssh -R`), routed to the
-/// tunnel that asked for the port.
+/// tunnel that asked for that listen address and port.
 #[derive(Default)]
 pub struct ForwardRouter {
-    routes: std::sync::Mutex<HashMap<u32, mpsc::UnboundedSender<ForwardedTcpip>>>,
+    routes: std::sync::Mutex<HashMap<(String, u32), mpsc::UnboundedSender<ForwardedTcpip>>>,
 }
 
 impl ForwardRouter {
-    pub fn sender(&self, port: u32) -> Option<mpsc::UnboundedSender<ForwardedTcpip>> {
-        self.routes.lock().ok()?.get(&port).cloned()
-    }
-
-    fn insert(&self, port: u32, tx: mpsc::UnboundedSender<ForwardedTcpip>) {
-        if let Ok(mut routes) = self.routes.lock() {
-            routes.insert(port, tx);
+    /// The tunnel for `address:port`. Servers report the address as it was
+    /// requested, but when only one tunnel uses the port it gets the
+    /// connection whatever the spelling.
+    pub fn sender(&self, address: &str, port: u32) -> Option<mpsc::UnboundedSender<ForwardedTcpip>> {
+        let routes = self.routes.lock().ok()?;
+        if let Some(tx) = routes.get(&(address.to_string(), port)) {
+            return Some(tx.clone());
+        }
+        let mut on_port = routes.iter().filter(|((_, p), _)| *p == port);
+        match (on_port.next(), on_port.next()) {
+            (Some((_, tx)), None) => Some(tx.clone()),
+            _ => None,
         }
     }
 
-    fn remove(&self, port: u32) {
+    fn insert(&self, address: &str, port: u32, tx: mpsc::UnboundedSender<ForwardedTcpip>) {
         if let Ok(mut routes) = self.routes.lock() {
-            routes.remove(&port);
+            routes.insert((address.to_string(), port), tx);
+        }
+    }
+
+    fn remove(&self, address: &str, port: u32) {
+        if let Ok(mut routes) = self.routes.lock() {
+            routes.remove(&(address.to_string(), port));
         }
     }
 }
@@ -145,27 +156,32 @@ impl SshConnection {
     ) -> Result<(u32, mpsc::UnboundedReceiver<ForwardedTcpip>), russh::Error> {
         let (tx, rx) = mpsc::unbounded_channel();
         // Routed before asking: a client may connect as soon as it listens.
-        self.forwards.insert(port as u32, tx.clone());
+        self.forwards.insert(host, port as u32, tx.clone());
         match self.handle.write().await.tcpip_forward(host, port as u32).await {
             Ok(bound) => {
                 // The reply only carries a port when the server picked one.
                 let bound = if bound == 0 { port as u32 } else { bound };
                 if bound != port as u32 {
-                    self.forwards.remove(port as u32);
-                    self.forwards.insert(bound, tx);
+                    self.forwards.remove(host, port as u32);
+                    self.forwards.insert(host, bound, tx);
                 }
                 Ok((bound, rx))
             }
             Err(e) => {
-                self.forwards.remove(port as u32);
+                self.forwards.remove(host, port as u32);
                 Err(e)
             }
         }
     }
 
     pub async fn cancel_tcpip_forward(&self, host: &str, port: u32) {
-        self.forwards.remove(port);
+        self.forwards.remove(host, port);
         let _ = self.handle.read().await.cancel_tcpip_forward(host, port).await;
+    }
+
+    /// How many jump hosts it goes through.
+    fn depth(&self) -> usize {
+        self.via.as_ref().map_or(0, |via| via.depth() + 1)
     }
 
     /// Whether this connection, or one it rides on, has ended.
@@ -178,10 +194,14 @@ impl SshConnection {
     /// output is capped at `max_output` bytes per stream. Callers bound the
     /// time it may take.
     pub async fn exec(&self, command: &str, stdin: Option<&[u8]>, max_output: usize) -> Result<ExecOutput, String> {
-        let mut channel = self
-            .open_session()
-            .await
-            .map_err(|e| format!("Could not open a channel: {e}"))?;
+        let mut channel = self.open_session().await.map_err(|e| match e {
+            russh::Error::ChannelOpenFailure(_) => format!(
+                "The server refused another session on the connection to {} (sshd MaxSessions). \
+                 Close a tab to this host, or turn off connection sharing in Settings > SSH & Sessions.",
+                self.target
+            ),
+            e => format!("Could not open a channel: {e}"),
+        })?;
         channel
             .exec(true, command)
             .await
@@ -375,12 +395,13 @@ impl ConnectionPool {
 
     /// Say goodbye on every open connection (app shutdown).
     pub async fn disconnect_all(&self) {
-        let connections: Vec<Arc<SshConnection>> = match self.live.lock() {
+        let mut connections: Vec<Arc<SshConnection>> = match self.live.lock() {
             Ok(live) => live.values().filter_map(Weak::upgrade).collect(),
             Err(_) => return,
         };
         // Innermost first, so a host's goodbye still gets through its jump host.
-        for connection in connections.iter().rev() {
+        connections.sort_by_key(|connection| std::cmp::Reverse(connection.depth()));
+        for connection in &connections {
             let _ = tokio::time::timeout(SHUTDOWN_DISCONNECT_TIMEOUT, connection.disconnect()).await;
         }
     }
@@ -472,14 +493,16 @@ f="$HOME/.ssh/authorized_keys"
 touch "$f" || exit 1
 if grep -qF "$data" "$f"; then echo already; exit 0; fi
 if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo >> "$f"; fi
-printf "%s
-" "$key" >> "$f" || exit 1
+printf "%s\n" "$key" >> "$f" || exit 1
 command -v restorecon >/dev/null 2>&1 && restorecon -F "$HOME/.ssh" "$f" >/dev/null 2>&1
 echo added"#;
 
 /// The shell command running `script` with `sh`, whatever the login shell.
+/// Lines are joined with `;`: csh and tcsh reject a newline inside quotes.
+/// (Every line of the scripts here is a complete command.)
 pub fn sh_command(script: &str) -> String {
-    format!("sh -c '{}'", script.replace('\'', "'\\''"))
+    let one_line = script.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join("; ");
+    format!("sh -c '{}'", one_line.replace('\'', "'\\''"))
 }
 
 /// A byte stream to `address:port`, through the end of `jump_route` when it
@@ -506,4 +529,42 @@ pub async fn open_stream(
         .await
         .map_err(|e| format!("Could not reach {address}:{port} through jump host {}: {e}", jump.target))?;
     Ok((SshStream::Tunneled(channel.into_stream()), Some(jump)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_forwards_route_by_address_and_port() {
+        let router = ForwardRouter::default();
+        let (local_tx, _local_rx) = mpsc::unbounded_channel();
+        let (public_tx, _public_rx) = mpsc::unbounded_channel();
+        router.insert("127.0.0.1", 8080, local_tx.clone());
+        // Only one tunnel on the port: any spelling of the address finds it.
+        assert!(router.sender("localhost", 8080).is_some_and(|tx| tx.same_channel(&local_tx)));
+        // Two on the same port: each by its own address, nothing for others.
+        router.insert("0.0.0.0", 8080, public_tx.clone());
+        assert!(router.sender("0.0.0.0", 8080).is_some_and(|tx| tx.same_channel(&public_tx)));
+        assert!(router.sender("127.0.0.1", 8080).is_some_and(|tx| tx.same_channel(&local_tx)));
+        assert!(router.sender("localhost", 8080).is_none());
+        // Stopping one leaves the other.
+        router.remove("0.0.0.0", 8080);
+        assert!(router.sender("0.0.0.0", 8080).is_some_and(|tx| tx.same_channel(&local_tx)));
+        assert!(router.sender("127.0.0.1", 9090).is_none());
+    }
+
+    #[test]
+    fn scripts_become_one_line_for_any_login_shell() {
+        let command = sh_command("umask 077\n  echo \"a b\"\n\nexit 0\n");
+        assert_eq!(command, "sh -c 'umask 077; echo \"a b\"; exit 0'");
+        assert_eq!(sh_command("echo 'quoted'"), "sh -c 'echo '\\''quoted'\\'''");
+        // Joining lines is only safe when no quoted string spans two lines.
+        for script in [INSTALL_PUBLIC_KEY_SCRIPT, crate::hostinfo::stats::STATS_SCRIPT] {
+            for line in script.lines() {
+                assert_eq!(line.matches('"').count() % 2, 0, "quote spans lines at: {line}");
+            }
+            assert!(!sh_command(script).contains('\n'));
+        }
+    }
 }

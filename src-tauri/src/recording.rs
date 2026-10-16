@@ -42,12 +42,21 @@ impl Recorder {
             .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
             .take(40)
             .collect();
-        let name = format!("{}-{}.cast", now.format("%Y%m%d-%H%M%S"), slug.trim_matches('_'));
+        let base = format!("{}-{}", now.format("%Y%m%d-%H%M%S"), slug.trim_matches('_'));
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let file = options.open(dir.join(&name))?;
+        // Tabs reconnecting or reopening together start in the same second.
+        let mut attempt = 1;
+        let (file, name) = loop {
+            let name = if attempt == 1 { format!("{base}.cast") } else { format!("{base}-{attempt}.cast") };
+            match options.open(dir.join(&name)) {
+                Ok(file) => break (file, name),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 1000 => attempt += 1,
+                Err(e) => return Err(e),
+            }
+        };
         let mut writer = BufWriter::new(file);
         let header = serde_json::json!({
             "version": 2,
@@ -153,11 +162,13 @@ fn info(path: &Path) -> Option<RecordingInfo> {
     let mut header = String::new();
     BufReader::new(&file).read_line(&mut header).ok()?;
     let header: serde_json::Value = serde_json::from_str(&header).ok()?;
-    // The duration is the time of the last event: read the file's tail.
-    let mut tail = String::new();
+    // The duration is the time of the last event: read the file's tail. It
+    // may start inside a UTF-8 character (box drawing is common in output).
+    let mut bytes = Vec::new();
     let mut file = file;
     file.seek(SeekFrom::Start(size.saturating_sub(64 * 1024))).ok()?;
-    file.take(64 * 1024).read_to_string(&mut tail).ok();
+    file.take(64 * 1024).read_to_end(&mut bytes).ok();
+    let tail = String::from_utf8_lossy(&bytes);
     let duration = tail
         .lines()
         .rev()
@@ -215,6 +226,13 @@ mod tests {
         assert_eq!(lines.last().unwrap()[1], "r");
         assert_eq!(lines.last().unwrap()[2], "120x40");
         assert!(name.ends_with("-root_web_1.cast"), "{name}");
+
+        // A second recording in the same second gets its own file.
+        let second = Recorder::create(&dir, "root@web 1", 100, 30).unwrap();
+        assert_ne!(second.name, name);
+        let second_name = second.name.clone();
+        second.finish();
+        fs::remove_file(dir.join(second_name)).unwrap();
 
         let listed = list(&dir);
         assert_eq!(listed.len(), 1);

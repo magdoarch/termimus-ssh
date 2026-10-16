@@ -5,6 +5,8 @@ interface VariablesRequest {
   title: string;
   command: string;
   variables: SnippetVariable[];
+  /** Tagged "secret": the filled command isn't shown */
+  secret: boolean;
   resolve: (filled: string | null) => void;
 }
 
@@ -13,7 +15,7 @@ interface SnippetVarsState {
   /** Last value typed per variable name, offered next time (this session only) */
   lastValues: Record<string, string>;
   /** The command with its variables filled in, asking for them first; null when cancelled. */
-  fill: (command: string, title?: string) => Promise<string | null>;
+  fill: (command: string, title?: string, secret?: boolean) => Promise<string | null>;
   finish: (values: Record<string, string> | null) => void;
 }
 
@@ -21,12 +23,12 @@ interface SnippetVarsState {
 export const useSnippetVarsStore = create<SnippetVarsState>((set, get) => ({
   request: null,
   lastValues: {},
-  fill: (command, title = "Snippet") => {
+  fill: (command, title = "Snippet", secret = false) => {
     const variables = snippetVariables(command);
     if (variables.length === 0) return Promise.resolve(command);
     // A newer run replaces a dialog that is still open.
     get().request?.resolve(null);
-    return new Promise((resolve) => set({ request: { title, command, variables, resolve } }));
+    return new Promise((resolve) => set({ request: { title, command, variables, secret, resolve } }));
   },
   finish: (values) => {
     const request = get().request;

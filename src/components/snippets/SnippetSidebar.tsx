@@ -163,7 +163,8 @@ export function SnippetSidebar() {
   // Run execution handler
   const handleExecute = useCallback(
     async (snippet: Snippet, mode: "auto" | "broadcast" | "single") => {
-      const command = await useSnippetVarsStore.getState().fill(snippet.command, snippet.title);
+      const secret = snippet.tags.some((t) => t.toLowerCase() === "secret");
+      const command = await useSnippetVarsStore.getState().fill(snippet.command, snippet.title, secret);
       if (command === null) return;
       const res = await sendSnippetToTerminals(command, mode);
       const feedbackMsg = res.ok
