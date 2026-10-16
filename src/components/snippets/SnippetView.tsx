@@ -19,6 +19,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useSnippetStore } from "../../stores/useSnippetStore";
 import { useSessionStore } from "../../stores/useSessionStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
+import { useSnippetVarsStore } from "../../stores/useSnippetVarsStore";
 import { Snippet } from "../../lib/api";
 import { copyText } from "../../lib/clipboard";
 
@@ -121,7 +122,11 @@ export function SnippetView() {
 
   const handleRun = useCallback(
     async (snippetId: string, command: string) => {
-      const ok = await sendTextToActiveSession(command);
+      const snippet = useSnippetStore.getState().snippets.find((s) => s.id === snippetId);
+      const secret = Boolean(snippet?.tags.some((t) => t.toLowerCase() === "secret"));
+      const filled = await useSnippetVarsStore.getState().fill(command, snippet?.title, secret);
+      if (filled === null) return;
+      const ok = await sendTextToActiveSession(filled);
       setRunFeedback({ id: snippetId, ok });
       setTimeout(() => setRunFeedback((prev) => (prev?.id === snippetId ? null : prev)), 2000);
     },

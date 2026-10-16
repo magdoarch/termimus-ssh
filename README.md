@@ -92,6 +92,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 ### 📜 Snippets & Scripts
 - **Instant Script Runner**: Store frequently used shell scripts, deployment commands, and system diagnostics.
 - **Active Tab Injection**: Send snippets straight into your running terminal session with a single click.
+- **Variables**: `{{name}}` or `{{name:default}}` placeholders are asked for each time a snippet runs.
 
 ### 🔒 Enterprise-Grade Local Security
 - **Zero-Knowledge Vault**: All passwords and keys are encrypted at rest with **AES-256-GCM** using keys derived via **Argon2id**.
