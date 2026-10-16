@@ -15,6 +15,7 @@ Termimus — a self-hosted SSH/server manager desktop app (Termius clone), built
   - `src/lib/format.ts` — shared formatting helpers (bytes, dates, paths).
 - **Backend**: Rust in `src-tauri/src/`.
   - `ssh/` — SSH session manager (`russh`), PTY streaming, host key verification (`SshClientHandler`). `auth_prompt.rs`: keyboard-interactive/2FA prompts.
+  - `sshconfig/` — `~/.ssh/config` + `known_hosts` parsing and the import.
   - `remote/` — VNC (`vnc-rs`) and RDP (IronRDP) sessions.
   - `sftp/` — SFTP manager (`russh-sftp`) + local filesystem helpers.
   - `tunnel/` — local (`-L`), remote (`-R`) and dynamic SOCKS (`-D`) port forwarding.

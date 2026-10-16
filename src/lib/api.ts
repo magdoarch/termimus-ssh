@@ -205,6 +205,66 @@ export interface KnownHost {
   last_seen_at: string;
 }
 
+/** What importing an OpenSSH client config would bring in (see sshconfig::import) */
+export interface SshConfigPreview {
+  configPath: string;
+  hosts: SshConfigHostPreview[];
+  /** Every key the hosts and the jump hosts created for them would use */
+  keys: SshConfigKeyPreview[];
+  knownHostsFiles: string[];
+  warnings: string[];
+}
+
+export interface SshConfigHostPreview {
+  alias: string;
+  address: string;
+  port: number;
+  username: string;
+  /** A SshConfigKeyPreview.path; without a key the password is asked at login */
+  identityFile: string | null;
+  /** The config names no key; this is ssh's default key */
+  defaultIdentity: boolean;
+  proxyJump: string | null;
+  /** Key of the jump host the import would create for it */
+  jumpIdentityFile: string | null;
+  /** Label of the Termimus host with the same address, port and user */
+  existingHost: string | null;
+  /** An earlier alias for the same address, port and user */
+  sameAs: string | null;
+  /** ~/.ssh/known_hosts has a host key for it */
+  knownHostKey: boolean;
+  notes: string[];
+}
+
+export interface SshConfigKeyPreview {
+  path: string;
+  displayPath: string;
+  status: "ok" | "encrypted" | "missing" | "unusable";
+  keyType: string;
+  fingerprint: string;
+  detail: string | null;
+  /** Keychain key with the same fingerprint, reused instead of a copy */
+  keychainName: string | null;
+}
+
+export interface SshConfigImportRequest {
+  configPath: string | null;
+  aliases: string[];
+  folderName: string | null;
+  trustKnownHosts: boolean;
+  /** Passphrases to save with encrypted keys, by SshConfigKeyPreview.path */
+  keyPassphrases: Record<string, string>;
+}
+
+export interface SshConfigImportResult {
+  hostsAdded: number;
+  jumpHostsAdded: number;
+  keysAdded: number;
+  keysReused: number;
+  hostKeysTrusted: number;
+  warnings: string[];
+}
+
 export interface GeneratedKeyPair {
   private_key_pem: string;
   public_key_openssh: string;
@@ -415,6 +475,12 @@ export const api = {
   listKnownHosts: () => invoke<KnownHost[]>("known_host_list"),
   deleteKnownHost: (address: string, port: number) =>
     invoke<void>("known_host_delete", { address, port }),
+
+  // Import from an OpenSSH client config (~/.ssh/config by default)
+  previewSshConfig: (path?: string | null) =>
+    invoke<SshConfigPreview>("ssh_config_preview", { path: path?.trim() || null }),
+  importSshConfig: (request: SshConfigImportRequest) =>
+    invoke<SshConfigImportResult>("ssh_config_import", { request }),
 
   // Backup & Restore
   exportBackup: (passphrase?: string) =>

@@ -98,35 +98,7 @@ pub struct KeyDetails {
     pub is_public_key_only: bool,
 }
 
-/// Inspects a key (private key PEM OR OpenSSH public key string) and extracts
-/// its algorithm badge, OpenSSH public key, and SHA256 fingerprint.
-pub fn inspect_key(pem: &str, passphrase: Option<&str>) -> Result<KeyDetails, String> {
-    let trimmed = pem.trim();
-    if is_public_key_text(trimmed) {
-        let normalized = normalize_public_key_text(trimmed);
-        let pubkey = PublicKey::from_openssh(&normalized)
-            .map_err(|e| format!("Invalid public key: {e}"))?;
-        let public_key = pubkey
-            .to_openssh()
-            .map_err(|e| format!("Failed to encode public key: {e}"))?;
-        let fingerprint = format!("{}", pubkey.fingerprint(russh::keys::ssh_key::HashAlg::Sha256));
-        let algorithm = match pubkey.algorithm() {
-            Algorithm::Ed25519 => "ED25519".to_string(),
-            Algorithm::Rsa { .. } => "RSA".to_string(),
-            Algorithm::Ecdsa { .. } => "ECDSA".to_string(),
-            other => other.to_string(),
-        };
-        return Ok(KeyDetails {
-            algorithm,
-            public_key,
-            fingerprint,
-            is_public_key_only: true,
-        });
-    }
-
-    let key_pair = decode_secret_key(trimmed, passphrase)
-        .map_err(|e| format!("Invalid private key: {e}"))?;
-    let pubkey = key_pair.public_key();
+pub fn describe_public_key(pubkey: &PublicKey, is_public_key_only: bool) -> Result<KeyDetails, String> {
     let public_key = pubkey
         .to_openssh()
         .map_err(|e| format!("Failed to encode public key: {e}"))?;
@@ -141,7 +113,7 @@ pub fn inspect_key(pem: &str, passphrase: Option<&str>) -> Result<KeyDetails, St
         algorithm,
         public_key,
         fingerprint,
-        is_public_key_only: false,
+        is_public_key_only,
     })
 }
 
@@ -149,6 +121,29 @@ pub fn inspect_key(pem: &str, passphrase: Option<&str>) -> Result<KeyDetails, St
 /// passphrase was given (OpenSSH, legacy PEM and PKCS#8 keys).
 pub fn is_missing_passphrase(pem: &str, error: &russh::keys::Error) -> bool {
     matches!(error, russh::keys::Error::KeyIsEncrypted) || pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----")
+}
+
+/// What an encrypted key shows without its passphrase: OpenSSH keys keep
+/// their public half in the clear, legacy PEM and PKCS#8 keys don't (`None`).
+pub fn inspect_encrypted_key(pem: &str) -> Option<KeyDetails> {
+    let key = PrivateKey::from_openssh(pem.trim()).ok()?;
+    describe_public_key(key.public_key(), false).ok()
+}
+
+/// Inspects a key (private key PEM OR OpenSSH public key string) and extracts
+/// its algorithm badge, OpenSSH public key, and SHA256 fingerprint.
+pub fn inspect_key(pem: &str, passphrase: Option<&str>) -> Result<KeyDetails, String> {
+    let trimmed = pem.trim();
+    if is_public_key_text(trimmed) {
+        let normalized = normalize_public_key_text(trimmed);
+        let pubkey = PublicKey::from_openssh(&normalized)
+            .map_err(|e| format!("Invalid public key: {e}"))?;
+        return describe_public_key(&pubkey, true);
+    }
+
+    let key_pair = decode_secret_key(trimmed, passphrase)
+        .map_err(|e| format!("Invalid private key: {e}"))?;
+    describe_public_key(key_pair.public_key(), false)
 }
 
 #[cfg(test)]

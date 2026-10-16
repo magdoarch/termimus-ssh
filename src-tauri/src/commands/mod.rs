@@ -1452,6 +1452,36 @@ pub fn known_host_delete(
     state.db.delete_known_host(&address, port).map_err(|e| e.to_string())
 }
 
+// ================= SSH CONFIG IMPORT =================
+
+/// Hosts, keys and known host keys an import of `path` (default
+/// `~/.ssh/config`) would bring in. Reads only; nothing is saved.
+#[tauri::command]
+pub async fn ssh_config_preview(
+    state: State<'_, AppState>,
+    path: Option<String>,
+) -> Result<crate::sshconfig::import::ImportPreview, String> {
+    run_blocking_with_state(&state, move |state| {
+        let home = dirs::home_dir().ok_or("Could not find your home directory")?;
+        crate::sshconfig::import::preview(&state.db, &home, path.as_deref())
+    })
+    .await
+}
+
+/// Import the chosen config hosts with their keys, jump hosts and known
+/// host keys. Key passphrases are checked (bcrypt) off the main thread.
+#[tauri::command]
+pub async fn ssh_config_import(
+    state: State<'_, AppState>,
+    request: crate::sshconfig::import::ImportRequest,
+) -> Result<crate::sshconfig::import::ImportResult, String> {
+    run_blocking_with_state(&state, move |state| {
+        let home = dirs::home_dir().ok_or("Could not find your home directory")?;
+        crate::sshconfig::import::import(&state.db, &state.vault, &home, &request)
+    })
+    .await
+}
+
 // ================= BACKUP & RESTORE COMMANDS =================
 
 /// Export a backup bundle. When `passphrase` is provided the entire bundle

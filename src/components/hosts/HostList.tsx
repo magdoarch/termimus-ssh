@@ -19,6 +19,7 @@ import {
   Rows2,
   RefreshCw,
   Check,
+  FileInput,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useHostStore } from "../../stores/useHostStore";
@@ -28,6 +29,7 @@ import { usePingStore } from "../../stores/usePingStore";
 import { useConfirmStore } from "../../stores/useConfirmStore";
 import { useVaultStore } from "../../stores/useVaultStore";
 import { FolderModal } from "./FolderModal";
+import { SshConfigImportModal } from "./SshConfigImportModal";
 import { Host, Folder, isSshHost, PROTOCOL_LABELS } from "../../lib/api";
 import { DistroBadge } from "./DistroBadge";
 import { HostListRow } from "./HostListRow";
@@ -110,6 +112,7 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
   } | null>(null);
 
   const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const showCopyToast = useCallback((msg: string) => {
     setCopyToast(msg);
@@ -336,6 +339,8 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
       {/* Folder create/rename modal */}
       <FolderModal />
 
+      {isImportOpen && <SshConfigImportModal onClose={() => setIsImportOpen(false)} />}
+
       {/* Top Search & Actions Bar */}
       <div className="mb-6 flex flex-col gap-2.5 min-w-0">
         <div className="flex items-center justify-between gap-3 min-w-0">
@@ -416,6 +421,16 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                 <List size={15} />
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setIsImportOpen(true)}
+              title="Import hosts from ~/.ssh/config"
+              className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-high)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-highest)] transition-colors shadow-sm shrink-0 cursor-pointer"
+            >
+              <FileInput size={14} />
+              <span>Import</span>
+            </button>
 
             <button
               type="button"
@@ -641,12 +656,21 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
                   Add a server to start SSH sessions, transfer files via SFTP, and forward ports.
                 </p>
                 {hosts.length === 0 && (
-                  <button
-                    onClick={() => openCreateModal()}
-                    className="mt-4 rounded-xl bg-[var(--primary)] px-3.5 py-1.5 text-xs font-semibold text-[var(--on-primary)] hover:bg-[var(--primary-hover)] transition"
-                  >
-                    Add Your First Host
-                  </button>
+                  <div className="mt-4 flex items-center gap-2">
+                    <button
+                      onClick={() => openCreateModal()}
+                      className="rounded-xl bg-[var(--primary)] px-3.5 py-1.5 text-xs font-semibold text-[var(--on-primary)] hover:bg-[var(--primary-hover)] transition"
+                    >
+                      Add Your First Host
+                    </button>
+                    <button
+                      onClick={() => setIsImportOpen(true)}
+                      className="flex items-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-high)] px-3.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-highest)] transition"
+                    >
+                      <FileInput size={13} />
+                      Import ~/.ssh/config
+                    </button>
+                  </div>
                 )}
               </div>
             ) : viewMode === "grid" ? (
@@ -913,6 +937,17 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
               >
                 <FolderPlus size={13} />
                 <span>New Group</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsImportOpen(true);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+              >
+                <FileInput size={13} />
+                <span>Import from SSH config</span>
               </button>
 
               <div className="my-1 h-[1px] bg-[var(--border)]" />

@@ -5,6 +5,7 @@ pub mod pty;
 pub mod remote;
 pub mod sftp;
 pub mod ssh;
+pub mod sshconfig;
 pub mod sshkey;
 pub mod tunnel;
 pub mod vault;
@@ -112,6 +113,8 @@ pub fn run() {
             commands::ping_hosts,
             commands::known_host_list,
             commands::known_host_delete,
+            commands::ssh_config_preview,
+            commands::ssh_config_import,
             commands::backup_export,
             commands::backup_import,
             commands::sync_test_connection,
