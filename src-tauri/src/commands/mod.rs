@@ -762,6 +762,59 @@ fn jump_route(state: &AppState, host: &Host) -> Result<Route, String> {
     hops_for(state, &jump_chain(state, host)?)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallKeyResult {
+    /// The key was in authorized_keys already; nothing changed.
+    pub already_installed: bool,
+}
+
+/// Add a Keychain key's public half to the host's `~/.ssh/authorized_keys`
+/// (like `ssh-copy-id`), logging in the way the host is set up now.
+#[tauri::command]
+pub async fn ssh_install_public_key(
+    state: State<'_, AppState>,
+    host_id: String,
+    credential_id: String,
+) -> Result<InstallKeyResult, String> {
+    let host = state
+        .db
+        .get_host(&host_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Host not found".to_string())?;
+    let credential = state
+        .db
+        .get_credential(&credential_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Keychain item not found".to_string())?;
+    let public_key = credential.public_key.trim().to_string();
+    if public_key.is_empty() {
+        return Err("This Keychain item has no public key".to_string());
+    }
+
+    let route = ssh_route(&state, &host)?;
+    let quiet = |_: u8, _: &str, _: &str| {};
+    let (connection, _) = state.pool.connect(&state.db, &route, &quiet).await?;
+    let command = crate::ssh::conn::sh_command(crate::ssh::conn::INSTALL_PUBLIC_KEY_SCRIPT);
+    let stdin = format!("{public_key}\n");
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        connection.exec(&command, Some(stdin.as_bytes()), 4096),
+    )
+    .await
+    .map_err(|_| "The server took too long to answer".to_string())??;
+    match output.exit_status {
+        Some(0) => Ok(InstallKeyResult {
+            already_installed: output.stdout_text().trim() == "already",
+        }),
+        _ => Err(format!(
+            "Could not update ~/.ssh/authorized_keys on {}: {}",
+            host.label,
+            output.stderr_text().trim()
+        )),
+    }
+}
+
 /// Settings: share one SSH connection per host (on by default).
 #[tauri::command]
 pub fn ssh_set_connection_sharing(state: State<AppState>, enabled: bool) {

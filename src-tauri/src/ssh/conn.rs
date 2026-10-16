@@ -479,6 +479,32 @@ async fn open(
     })
 }
 
+/// Adds the public key read from stdin to `~/.ssh/authorized_keys` unless it
+/// is there already (same key data, any comment), like `ssh-copy-id`: new
+/// files get private permissions, a last line without a newline is ended
+/// first, and SELinux labels are restored where that applies. Prints
+/// "already" or "added". POSIX sh, wrapped so any login shell can run it.
+pub const INSTALL_PUBLIC_KEY_SCRIPT: &str = r#"umask 077
+key=$(cat)
+data=$(printf "%s" "$key" | awk "{print \$2}")
+[ -n "$data" ] || { echo "not a public key" >&2; exit 2; }
+mkdir -p "$HOME/.ssh" || exit 1
+f="$HOME/.ssh/authorized_keys"
+touch "$f" || exit 1
+if grep -qF "$data" "$f"; then echo already; exit 0; fi
+if [ -s "$f" ] && [ -n "$(tail -c1 "$f")" ]; then echo >> "$f"; fi
+printf "%s\n" "$key" >> "$f" || exit 1
+command -v restorecon >/dev/null 2>&1 && restorecon -F "$HOME/.ssh" "$f" >/dev/null 2>&1
+echo added"#;
+
+/// The shell command running `script` with `sh`, whatever the login shell.
+/// Lines are joined with `;`: csh and tcsh reject a newline inside quotes.
+/// (Every line of the scripts here is a complete command.)
+pub fn sh_command(script: &str) -> String {
+    let one_line = script.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join("; ");
+    format!("sh -c '{}'", one_line.replace('\'', "'\\''"))
+}
+
 /// A byte stream to `address:port`, through the end of `jump_route` when it
 /// isn't empty (VNC and RDP behind a bastion). The connection returned with
 /// it must stay alive while the stream is in use.
@@ -526,5 +552,17 @@ mod tests {
         router.remove("0.0.0.0", 8080);
         assert!(router.sender("0.0.0.0", 8080).is_some_and(|tx| tx.same_channel(&local_tx)));
         assert!(router.sender("127.0.0.1", 9090).is_none());
+    }
+
+    #[test]
+    fn scripts_become_one_line_for_any_login_shell() {
+        let command = sh_command("umask 077\n  echo \"a b\"\n\nexit 0\n");
+        assert_eq!(command, "sh -c 'umask 077; echo \"a b\"; exit 0'");
+        assert_eq!(sh_command("echo 'quoted'"), "sh -c 'echo '\\''quoted'\\'''");
+        // Joining lines is only safe when no quoted string spans two lines.
+        for line in INSTALL_PUBLIC_KEY_SCRIPT.lines() {
+            assert_eq!(line.matches('"').count() % 2, 0, "quote spans lines at: {line}");
+        }
+        assert!(!sh_command(INSTALL_PUBLIC_KEY_SCRIPT).contains('\n'));
     }
 }

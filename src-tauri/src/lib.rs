@@ -131,6 +131,7 @@ pub fn run() {
             commands::ssh_set_connection_sharing,
             commands::totp_preview,
             commands::host_totp_code,
+            commands::ssh_install_public_key,
         ])
         .build(tauri::generate_context!())
         .expect("error while building termimus application")

@@ -65,6 +65,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Jump Host Chains**: Reach hosts through any chain of bastions (ProxyJump, up to 8 hops) — for terminals, SFTP, tunnels and remote desktops.
 - **Shared Connections**: Tabs, SFTP panes and tunnels to the same host share one SSH connection (like OpenSSH's ControlMaster), so a password or 2FA code is asked once.
 - **Import `~/.ssh/config`**: Hosts, their keys, ProxyJump chains and the host keys in `~/.ssh/known_hosts` in one step, with a preview first.
+- **Install SSH Keys**: Put a Keychain key into a server's `authorized_keys` (like `ssh-copy-id`) and switch the host to it.
 
 ### 🖼️ Remote Desktop
 - **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.
