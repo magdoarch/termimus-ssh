@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-/// Unflushed output is written out at least this often.
+/// Output is written to disk when more arrives this long after the last
+/// write, when the buffer fills, and when the recording ends.
 const FLUSH_EVERY: Duration = Duration::from_secs(2);
 /// Largest recording the player loads.
 pub const MAX_PLAYBACK_BYTES: u64 = 64 * 1024 * 1024;

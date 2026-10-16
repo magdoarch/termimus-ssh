@@ -297,6 +297,10 @@ impl ConnectionPool {
         self.sharing.store(enabled, Ordering::Relaxed);
     }
 
+    pub fn is_sharing(&self) -> bool {
+        self.sharing.load(Ordering::Relaxed)
+    }
+
     /// Connect along `route`, reusing live connections. Returns the
     /// connection to the last hop and whether it was already open.
     pub async fn connect(

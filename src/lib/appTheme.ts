@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-/** UI color theme. The terminal has its own theme (Settings → Terminal). */
+/** UI color theme. The terminal has its own theme (Settings → Appearance & Terminal). */
 export type AppTheme = "dark" | "light" | "system";
 
 const systemPrefersLight = () => window.matchMedia("(prefers-color-scheme: light)").matches;

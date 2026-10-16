@@ -13,7 +13,7 @@ export interface Host {
   last_connected_at?: string | null;
   os_icon?: string | null;
   jump_host_id?: string | null;
-  /** Connection protocol; hosts saved before v0.8 have "ssh" */
+  /** Connection protocol; hosts saved before remote desktop support have "ssh" */
   protocol: HostProtocol;
   /** JSON-encoded protocol options, e.g. VncOptions */
   protocol_options?: string | null;
@@ -620,7 +620,7 @@ export const api = {
       serverUrl,
       authToken: authToken?.trim() || null,
     }),
-  // Remote desktop (VNC). Frames arrive on `onFrame` as binary batches
+  // Remote desktop (VNC or RDP). Frames arrive on `onFrame` as binary batches
   // decoded by src/lib/remoteFrame.ts.
   remoteConnect: (
     hostId: string,

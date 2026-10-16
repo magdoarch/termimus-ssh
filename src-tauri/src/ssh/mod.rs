@@ -61,8 +61,8 @@ pub fn default_client_config() -> Arc<client::Config> {
 /// Client config for a connection to `address:port`. When a host key is
 /// already trusted for it, that key's algorithm goes first in the host-key
 /// preference list (as OpenSSH does), so the server presents the same kind of
-/// key we pinned — e.g. one imported from ~/.ssh/known_hosts — rather than a
-/// different type that would trip the "host key changed" check.
+/// key we pinned (say, one pinned before the server got an Ed25519 key) rather
+/// than a different type that would trip the "host key changed" check.
 pub fn client_config_for(db: &Database, address: &str, port: u16) -> Arc<client::Config> {
     let mut config = base_client_config();
     if let Ok(Some(known)) = db.get_known_host(address, port) {
@@ -907,11 +907,6 @@ impl SessionManager {
         let sessions = self.sessions.read().await;
         let recording = sessions.get(session_id)?.recording.lock().ok()?.clone();
         recording
-    }
-
-    /// The connection a live terminal session runs on (for exec helpers).
-    pub async fn connection(&self, session_id: &str) -> Option<Arc<SshConnection>> {
-        self.sessions.read().await.get(session_id).map(|s| s.connection.clone())
     }
 
     pub async fn write(&self, session_id: &str, data: Vec<u8>) -> Result<(), String> {

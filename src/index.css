@@ -61,7 +61,7 @@
   }
 
   /* Light palette. Set via <html data-theme="light"> (see src/lib/appTheme.ts).
-     The terminal keeps its own theme from Settings → Terminal. */
+     The terminal keeps its own theme from Settings → Appearance & Terminal. */
   :root[data-theme="light"] {
     --canvas: #f5f7fa;
     --surface: #ffffff;

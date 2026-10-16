@@ -165,7 +165,7 @@ export function InstallKeyModal() {
         </div>
 
         <div className="mt-5 flex justify-end gap-2">
-          {status.kind === "done" && !usesKey ? (
+          {status.kind === "done" && !usesKey && key?.kind === "private_key" ? (
             <>
               <button
                 type="button"

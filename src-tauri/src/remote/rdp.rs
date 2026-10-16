@@ -292,8 +292,8 @@ fn to_operations(input: RemoteInput) -> Vec<Operation> {
             }
             ops
         }
-        // Clipboard redirection (CLIPRDR) isn't implemented yet; a refresh has
-        // no RDP equivalent the server must honor.
+        // Clipboard text goes through CLIPRDR in `run`, not as input events; a
+        // refresh has no RDP equivalent the server must honor.
         RemoteInput::Clipboard { .. } | RemoteInput::Refresh => Vec::new(),
     }
 }

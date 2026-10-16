@@ -58,7 +58,7 @@ pub struct Host {
     /// before connecting to this host.
     #[serde(default)]
     pub jump_host_id: Option<String>,
-    /// Connection protocol: "ssh" (default) or "vnc".
+    /// Connection protocol: "ssh" (default), "vnc" or "rdp".
     #[serde(default = "default_protocol")]
     pub protocol: String,
     /// Protocol-specific options as JSON, e.g. `{"viewOnly":true}` for VNC.

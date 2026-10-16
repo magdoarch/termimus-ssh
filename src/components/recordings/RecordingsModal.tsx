@@ -172,8 +172,9 @@ export function RecordingsModal() {
           {!playing && (
             <p className="mt-3 text-[11px] text-[var(--text-muted)]">
               Recordings keep what the server showed (never what you typed) in{" "}
-              <span className="font-mono">~/.local/share/termimus/recordings</span>, readable only by you. Passwords
-              that a program echoes, or secrets printed on screen, are in them.
+              <span className="font-mono">termimus/recordings</span> under your app data folder (
+              <span className="font-mono">~/.local/share</span> on Linux), readable only by your account on Linux and
+              macOS. Passwords that a program echoes, or secrets printed on screen, are in them.
             </p>
           )}
         </div>

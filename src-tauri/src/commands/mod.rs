@@ -26,10 +26,25 @@ pub struct AppState {
     pub remote: Arc<RemoteDesktopManager>,
     /// SSH connections shared by terminal tabs, SFTP, tunnels and jump hosts.
     pub pool: Arc<ConnectionPool>,
+    /// The host panel's own connections while sharing is off (see `panel_pool`).
+    pub panel_pool: Arc<ConnectionPool>,
     /// Server dashboards: stats sampled over the host's connection.
     pub monitor: Arc<crate::hostinfo::HostMonitor>,
     /// Connections held open while a host panel is shown.
     pub leases: Arc<crate::hostinfo::ConnectionLeases>,
+}
+
+impl AppState {
+    /// Connections for the host panel's calls (stats, Docker): the shared
+    /// pool, or with connection sharing off one of the panel's own, so a panel
+    /// that polls logs in once instead of on every call.
+    fn panel_pool(&self) -> &ConnectionPool {
+        if self.pool.is_sharing() {
+            &self.pool
+        } else {
+            &self.panel_pool
+        }
+    }
 }
 
 /// Minimum master password length for new or changed vault passwords.
@@ -838,7 +853,7 @@ pub async fn host_monitor_start(
     let interval = std::time::Duration::from_secs(interval_secs.unwrap_or(3));
     state
         .monitor
-        .start(app, state.db.clone(), &state.pool, route, monitor_id, interval)
+        .start(app, state.db.clone(), state.panel_pool(), route, monitor_id, interval)
         .await
 }
 
@@ -848,7 +863,7 @@ pub async fn host_monitor_stop(state: State<'_, AppState>, monitor_id: String) -
     Ok(())
 }
 
-/// The host's (shared) SSH connection, logging in if none is open.
+/// The host's SSH connection for panel calls, logging in if none is open.
 async fn host_connection(state: &AppState, host_id: &str) -> Result<Arc<crate::ssh::SshConnection>, String> {
     let host = state
         .db
@@ -857,7 +872,7 @@ async fn host_connection(state: &AppState, host_id: &str) -> Result<Arc<crate::s
         .ok_or_else(|| "Host not found".to_string())?;
     let route = ssh_route(state, &host)?;
     let quiet = |_: u8, _: &str, _: &str| {};
-    Ok(state.pool.connect(&state.db, &route, &quiet).await?.0)
+    Ok(state.panel_pool().connect(&state.db, &route, &quiet).await?.0)
 }
 
 /// Keep the host's connection open until released (a panel is showing), so

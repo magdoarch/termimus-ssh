@@ -73,7 +73,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.
 
 ### 📊 Server Dashboard & Docker
-- **Live Server Stats**: CPU (with a one-minute graph), load, memory, swap, disks and network rates over the host's SSH connection.
+- **Live Server Stats**: CPU (with a three-minute graph), load, memory, swap, disks and network rates over the host's SSH connection.
 - **Docker Containers**: List, start, stop, restart, pause and remove containers, follow their logs, or open a shell inside one.
 
 ### 🗂️ Workspaces & Multi-Server Cluster Launcher

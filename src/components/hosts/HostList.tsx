@@ -825,19 +825,21 @@ export function HostList({ onOpenTerminal, onOpenSftp, onOpenTunnels }: HostList
               </button>
 
               {/* Copy SSH Command */}
-              <button
-                onClick={async () => {
-                  const port = contextMenu.host!.port || 22;
-                  const cmd = `ssh -p ${port} ${contextMenu.host!.username}@${contextMenu.host!.address}`;
-                  await copyText(cmd);
-                  showCopyToast("Copied SSH command");
-                  setContextMenu(null);
-                }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
-              >
-                <Copy size={13} />
-                <span>Copy SSH Command</span>
-              </button>
+              {isSshHost(contextMenu.host!) && (
+                <button
+                  onClick={async () => {
+                    const port = contextMenu.host!.port || 22;
+                    const cmd = `ssh -p ${port} ${contextMenu.host!.username}@${contextMenu.host!.address}`;
+                    await copyText(cmd);
+                    showCopyToast("Copied SSH command");
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors group"
+                >
+                  <Copy size={13} />
+                  <span>Copy SSH Command</span>
+                </button>
+              )}
 
               {/* Copy Address */}
               <button

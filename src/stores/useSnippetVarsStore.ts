@@ -12,7 +12,7 @@ interface VariablesRequest {
 
 interface SnippetVarsState {
   request: VariablesRequest | null;
-  /** Last value typed per variable name, offered next time (this session only) */
+  /** Last value typed per variable name, offered next time (this session only; not for secret snippets) */
   lastValues: Record<string, string>;
   /** The command with its variables filled in, asking for them first; null when cancelled. */
   fill: (command: string, title?: string, secret?: boolean) => Promise<string | null>;
@@ -35,7 +35,7 @@ export const useSnippetVarsStore = create<SnippetVarsState>((set, get) => ({
     if (!request) return;
     set((state) => ({
       request: null,
-      lastValues: values ? { ...state.lastValues, ...values } : state.lastValues,
+      lastValues: values && !request.secret ? { ...state.lastValues, ...values } : state.lastValues,
     }));
     request.resolve(values ? fillSnippet(request.command, values) : null);
   },

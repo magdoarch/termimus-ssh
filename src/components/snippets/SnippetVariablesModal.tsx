@@ -57,6 +57,8 @@ export function SnippetVariablesModal() {
               <label className="mb-1 block font-mono text-[11px] text-[var(--text-muted)]">{variable.name}</label>
               <input
                 autoFocus={index === 0}
+                type={request.secret ? "password" : "text"}
+                autoComplete="off"
                 value={values[variable.name] ?? ""}
                 onChange={(e) => setValues((v) => ({ ...v, [variable.name]: e.target.value }))}
                 placeholder={variable.defaultValue || variable.name}
