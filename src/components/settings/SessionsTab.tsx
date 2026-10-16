@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ClipboardPaste, Network, type LucideIcon } from "lucide-react";
+import { ClipboardPaste, Network, RefreshCw, type LucideIcon } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore } from "../../stores/useSettingsStore";
 
@@ -41,6 +41,8 @@ export function SessionsTab() {
       setShareConnections: s.setShareConnections,
       confirmMultilinePaste: s.confirmMultilinePaste,
       setConfirmMultilinePaste: s.setConfirmMultilinePaste,
+      autoReconnect: s.autoReconnect,
+      setAutoReconnect: s.setAutoReconnect,
     }))
   );
 
@@ -62,6 +64,16 @@ export function SessionsTab() {
             OpenSSH's ControlMaster, so passwords and 2FA codes are asked once. When the server refuses another
             session on it (sshd <span className="font-mono">MaxSessions</span>), a separate connection is opened
             automatically. Turn off to log in separately every time.
+          </ToggleRow>
+          <ToggleRow
+            icon={RefreshCw}
+            title="Reconnect dropped sessions"
+            checked={settings.autoReconnect}
+            onChange={settings.setAutoReconnect}
+          >
+            When a connection drops (network change, sleep, server restart), the tab stays open with its scrollback
+            and logs in again, waiting a little longer after each failed try. Typing <span className="font-mono">exit</span>{" "}
+            still closes the tab.
           </ToggleRow>
         </div>
       </div>

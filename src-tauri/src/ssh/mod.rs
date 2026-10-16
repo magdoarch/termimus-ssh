@@ -86,6 +86,17 @@ fn prefer_host_key_algorithm(order: &[russh::keys::Algorithm], key_type: &str) -
         .collect()
 }
 
+/// Payload of `ssh-closed-{sessionId}`: why a terminal session ended.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionClosed {
+    pub session_id: String,
+    /// The connection dropped without the remote shell ending (network loss,
+    /// server restart): worth reconnecting. False after `exit`.
+    pub lost: bool,
+    pub exit_status: Option<u32>,
+}
+
 /// Progress payload emitted to the frontend during connection handshake.
 #[derive(Debug, Clone, Serialize)]
 pub struct SshProgressPayload {
@@ -704,6 +715,8 @@ impl SessionManager {
             let mut pending: Vec<u8> = Vec::new();
             let flush_delay = tokio::time::Duration::from_millis(8);
             let mut flush_deadline: Option<tokio::time::Instant> = None;
+            let mut exit_status: Option<u32> = None;
+            let mut shell_ended = false;
 
             loop {
                 let sleep = async {
@@ -747,11 +760,22 @@ impl SessionManager {
                                     }
                                 }
                             }
-                            Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
+                            Some(russh::ChannelMsg::ExitStatus { exit_status: status }) => {
+                                exit_status = Some(status);
+                                shell_ended = true;
+                            }
+                            Some(russh::ChannelMsg::ExitSignal { .. }) => shell_ended = true,
+                            msg @ (Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None) => {
                                 if !pending.is_empty() {
                                     let _ = app_for_output.emit(&event_name, std::mem::take(&mut pending));
                                 }
-                                let _ = app_for_output.emit(&closed_event, sid_for_output.clone());
+                                // EOF or CLOSE means the remote side ended the shell; only a
+                                // channel that just vanishes (the connection died) is lost.
+                                let lost = msg.is_none() && !shell_ended;
+                                let _ = app_for_output.emit(
+                                    &closed_event,
+                                    SessionClosed { session_id: sid_for_output.clone(), lost, exit_status },
+                                );
                                 break;
                             }
                             _ => {}

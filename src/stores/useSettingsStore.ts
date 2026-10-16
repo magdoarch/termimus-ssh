@@ -27,9 +27,12 @@ interface SettingsState {
   shareConnections: boolean;
   /** Ask before pasting text that would run line by line in the shell */
   confirmMultilinePaste: boolean;
+  /** Reconnect SSH tabs whose connection dropped (not after `exit`) */
+  autoReconnect: boolean;
   setAppTheme: (v: AppTheme) => void;
   setShareConnections: (v: boolean) => void;
   setConfirmMultilinePaste: (v: boolean) => void;
+  setAutoReconnect: (v: boolean) => void;
   setUseOsKeyring: (v: boolean) => void;
   setUseBiometrics: (v: boolean) => void;
   setAutoLockPolicy: (v: AutoLockPolicy) => void;
@@ -44,9 +47,11 @@ export const useSettingsStore = create<SettingsState>()(
       appTheme: "dark",
       shareConnections: true,
       confirmMultilinePaste: true,
+      autoReconnect: true,
       setAppTheme: (v) => set({ appTheme: v }),
       setShareConnections: (v) => set({ shareConnections: v }),
       setConfirmMultilinePaste: (v) => set({ confirmMultilinePaste: v }),
+      setAutoReconnect: (v) => set({ autoReconnect: v }),
       setUseOsKeyring: (v) => set({ useOsKeyring: v }),
       setUseBiometrics: (v) => set({ useBiometrics: v }),
       setAutoLockPolicy: (v) => set({ autoLockPolicy: v }),

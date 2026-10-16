@@ -258,3 +258,48 @@ async fn installing_a_public_key_like_ssh_copy_id() {
     );
     run(format!("rm -rf {home}")).await;
 }
+
+/// What a terminal's channel sees before it ends: (exit status, EOF or CLOSE seen).
+async fn channel_ending(channel: &mut Channel<Msg>) -> (Option<u32>, bool) {
+    let (mut status, mut ended) = (None, false);
+    let wait = async {
+        while let Some(msg) = channel.wait().await {
+            match msg {
+                russh::ChannelMsg::ExitStatus { exit_status } => status = Some(exit_status),
+                russh::ChannelMsg::Eof | russh::ChannelMsg::Close => ended = true,
+                _ => {}
+            }
+        }
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(20), wait).await;
+    (status, ended)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn exit_and_lost_connections_look_different() {
+    let server = TestServer::from_env();
+    let db = Arc::new(Database::in_memory().unwrap());
+    let pool = ConnectionPool::new();
+
+    // `exit`: an exit status (and EOF/CLOSE) before the channel ends.
+    let (connection, _) = pool.connect(&db, &server.route(None), &no_progress()).await.unwrap();
+    let mut shell = connection.open_session().await.unwrap();
+    shell.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.unwrap();
+    shell.request_shell(true).await.unwrap();
+    shell.data(&b"exit 3\n"[..]).await.unwrap();
+    assert_eq!(channel_ending(&mut shell).await, (Some(3), true));
+
+    // The server side dies (its per-connection sshd is killed): the channel
+    // just ends, with no exit status or EOF — the session counts as lost.
+    let (connection, _) = pool.connect(&db, &server.route(None), &no_progress()).await.unwrap();
+    let mut shell = connection.open_session().await.unwrap();
+    shell.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.unwrap();
+    shell.request_shell(true).await.unwrap();
+    let killer = connection.clone();
+    tokio::spawn(async move {
+        let _ = killer.exec("kill -9 $PPID", None, 64).await;
+    });
+    assert_eq!(channel_ending(&mut shell).await, (None, false));
+    assert!(connection.is_closed());
+}
