@@ -7,6 +7,8 @@ import { listen } from "@tauri-apps/api/event";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { copyText } from "../../lib/clipboard";
 import { openExternalUrl } from "../../lib/openUrl";
+import { useSettingsStore } from "../../stores/useSettingsStore";
+import { usePasteConfirmStore } from "../../stores/usePasteConfirmStore";
 import {
   Copy,
   Clipboard,
@@ -155,6 +157,31 @@ async function handleCopyFromTerminal(
 let lastPasteTimestamp = 0;
 let lastPastedContent = "";
 
+/**
+ * Paste into the terminal (xterm wraps it for bracketed paste when the remote
+ * side asked for that). Text with line breaks going into a shell that would
+ * run each line right away is confirmed first (Settings > SSH & Sessions).
+ *
+ * Control characters are dropped first: xterm passes them through, and an ESC
+ * in the clipboard could end a bracketed paste early (`ESC[201~`) so the rest
+ * runs at once ("pastejacking").
+ */
+function pasteText(term: Terminal, text: string) {
+  // Keep tabs and line breaks; drop other C0 controls, DEL and C1 controls.
+  const clean = text.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/g, "");
+  const normalized = clean.replace(/\r\n?/g, "\n");
+  const runsLines = normalized.includes("\n") && !term.modes.bracketedPasteMode;
+  if (!runsLines || !useSettingsStore.getState().confirmMultilinePaste) {
+    term.paste(clean);
+    return;
+  }
+  usePasteConfirmStore.getState().ask({
+    text: normalized,
+    paste: (confirmed) => term.paste(confirmed),
+    done: () => term.focus(),
+  });
+}
+
 async function safePasteToTerminal(term: Terminal) {
   try {
     let text = "";
@@ -174,7 +201,7 @@ async function safePasteToTerminal(term: Terminal) {
     lastPasteTimestamp = now;
     lastPastedContent = text;
     // Uses xterm's bracketed paste mode which emits cleanly through term.onData (with multi-terminal sync)
-    term.paste(text);
+    pasteText(term, text);
   } catch (err) {
     console.warn("Clipboard paste failed:", err);
   }
@@ -631,7 +658,7 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
             }
             lastPasteTimestamp = now;
             lastPastedContent = text;
-            term.paste(text);
+            pasteText(term, text);
           } else {
             safePasteToTerminal(term);
           }

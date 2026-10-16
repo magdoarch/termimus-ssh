@@ -21,6 +21,7 @@ import { SnippetView } from "./components/snippets/SnippetView";
 import { KeychainView } from "./components/keychain/KeychainView";
 import { ConfirmModal } from "./components/layout/ConfirmModal";
 import { AuthPromptModal } from "./components/auth/AuthPromptModal";
+import { PasteConfirmModal } from "./components/terminal/PasteConfirmModal";
 import { useAuthPromptStore } from "./stores/useAuthPromptStore";
 import { SnippetModal } from "./components/snippets/SnippetModal";
 import { SettingsView } from "./components/settings/SettingsView";
@@ -255,6 +256,7 @@ function App() {
       {/* App-wide Delete & Action Confirmation Modal */}
       <ConfirmModal />
       <AuthPromptModal />
+      <PasteConfirmModal />
     </div>
   );
 }
