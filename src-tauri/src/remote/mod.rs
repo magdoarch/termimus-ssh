@@ -67,7 +67,8 @@ pub struct RemoteTarget {
 /// A handshaken protocol client, ready for its session loop.
 enum Connected {
     Vnc { client: VncClient, view_only: bool },
-    Rdp { connection: rdp::RdpConnection, view_only: bool },
+    /// Boxed: an RDP connection is far larger than a VNC client.
+    Rdp { connection: Box<rdp::RdpConnection>, view_only: bool },
 }
 
 struct RemoteSession {
@@ -79,6 +80,12 @@ pub struct RemoteDesktopManager {
     connecting: Mutex<HashSet<String>>,
     /// Session ids whose tab was closed while the connect was in flight.
     cancelled: Mutex<HashSet<String>>,
+}
+
+impl Default for RemoteDesktopManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RemoteDesktopManager {
@@ -158,7 +165,7 @@ impl RemoteDesktopManager {
         let progress = |step: u8, step_name: &str, message: &str| emit_progress(step, step_name, message, false);
         let (stream, jump) = crate::ssh::conn::open_stream(pool, &db, &jump_route, &address, port, &progress)
             .await
-            .map_err(|e| fail(e))?;
+            .map_err(fail)?;
         if self.is_cancelled(&session_id).await {
             return Err("Connection cancelled".to_string());
         }
@@ -188,10 +195,10 @@ impl RemoteDesktopManager {
                     rdp::connect(stream, db, &rdp_address, port, login, desktop, progress).await
                 })
                 .await
-                .map(|connection| Connected::Rdp { connection, view_only })
+                .map(|connection| Connected::Rdp { connection: Box::new(connection), view_only })
             }
         };
-        let connected = handshake.map_err(|e| fail(e))?;
+        let connected = handshake.map_err(fail)?;
 
         let (input_tx, input_rx) = mpsc::unbounded_channel();
         let session = Arc::new(RemoteSession { input_tx });
@@ -226,7 +233,7 @@ impl RemoteDesktopManager {
                     view_only,
                 )),
                 Connected::Rdp { connection, view_only } => Box::pin(run_rdp(
-                    connection,
+                    *connection,
                     input_rx,
                     on_frame,
                     app.clone(),
