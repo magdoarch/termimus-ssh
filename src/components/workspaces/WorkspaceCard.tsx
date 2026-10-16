@@ -283,7 +283,7 @@ export function WorkspaceCard({
                   {ping && (
                     <span
                       className={`font-mono text-[10px] shrink-0 ${
-                        ping.online ? "text-emerald-400" : "text-zinc-500"
+                        ping.online ? "text-[var(--success)]" : "text-[var(--text-muted)]"
                       }`}
                     >
                       {ping.online ? `${ping.latencyMs ?? 0}ms` : "offline"}
@@ -301,7 +301,7 @@ export function WorkspaceCard({
         <button
           onClick={handleLaunchClick}
           disabled={isLaunching}
-          className="flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-3 text-xs font-semibold text-black shadow-sm transition-all hover:bg-[var(--primary)]/90 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
+          className="flex h-9 w-full items-center justify-center gap-2 rounded-xl bg-[var(--primary)] px-3 text-xs font-semibold text-[var(--on-primary)] shadow-sm transition-all hover:bg-[var(--primary)]/90 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
         >
           {isLaunching ? (
             <>

@@ -88,7 +88,7 @@ export function TunnelModal() {
           </div>
           <button
             onClick={closeModal}
-            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-white transition-colors"
+            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition-colors"
           >
             <X size={18} />
           </button>

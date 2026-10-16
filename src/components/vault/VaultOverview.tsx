@@ -91,7 +91,7 @@ export function VaultOverview() {
               onClick={() => refresh()}
               disabled={isLoading}
               title="Refresh known hosts"
-              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-container)] hover:text-white transition-colors"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-container)] hover:text-[var(--text-primary)] transition-colors"
             >
               <RotateCw size={15} className={isLoading ? "animate-spin" : ""} />
             </button>

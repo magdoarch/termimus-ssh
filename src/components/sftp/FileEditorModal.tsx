@@ -186,7 +186,7 @@ export function FileEditorModal({
 
             <button
               onClick={handleClose}
-              className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white transition-colors"
+              className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] transition-colors"
             >
               <X size={18} />
             </button>

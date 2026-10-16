@@ -148,7 +148,7 @@ export const HostListRow = memo(function HostListRow({
           <button
             onClick={(e) => onSftp(e, host)}
             title="SFTP Browser"
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-white transition"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition"
           >
             <FolderOpen size={13} />
           </button>
@@ -159,7 +159,7 @@ export const HostListRow = memo(function HostListRow({
           <button
             onClick={() => onToggleMenu(host.id)}
             title="Options"
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-white transition"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition"
           >
             <MoreVertical size={14} />
           </button>

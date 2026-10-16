@@ -248,7 +248,7 @@ export function KeyModal() {
           </h2>
           <button
             onClick={closeKeyModal}
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
           >
             <X size={18} />
           </button>
@@ -318,7 +318,7 @@ export function KeyModal() {
                     }}
                     className={`flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium transition ${
                       copiedPrivateKey
-                        ? "bg-[var(--success)] text-black font-semibold"
+                        ? "bg-[var(--success)] text-[var(--on-success)] font-semibold"
                         : "bg-[var(--surface-high)] text-[var(--text-primary)] hover:bg-[var(--surface-highest)] border border-[var(--border)]"
                     }`}
                     title="Copy private key"
@@ -429,7 +429,7 @@ export function KeyModal() {
                   onClick={handleCopyPublicKey}
                   className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium transition ${
                     copied
-                      ? "bg-[var(--success)] text-black font-semibold"
+                      ? "bg-[var(--success)] text-[var(--on-success)] font-semibold"
                       : "bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)] font-semibold"
                   }`}
                 >
@@ -461,7 +461,7 @@ export function KeyModal() {
             <button
               type="button"
               onClick={closeKeyModal}
-              className="rounded-md px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+              className="rounded-md px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
             >
               Cancel
             </button>

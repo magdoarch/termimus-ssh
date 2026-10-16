@@ -205,7 +205,7 @@ export function SftpView() {
             <button
               onClick={disconnectRemote}
               title="Disconnect SFTP"
-              className="flex items-center gap-1 rounded bg-[var(--border)] px-2 py-1 text-[11px] text-[var(--text-muted)] hover:text-white"
+              className="flex items-center gap-1 rounded bg-[var(--border)] px-2 py-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
             >
               <Unplug size={12} /> Disconnect
             </button>
@@ -225,7 +225,7 @@ export function SftpView() {
             <button
               onClick={cancelTransfer}
               title="Cancel transfer"
-              className="flex items-center gap-1 rounded bg-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-white"
+              className="flex items-center gap-1 rounded bg-[var(--border)] px-1.5 py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
             >
               <X size={10} /> Cancel
             </button>

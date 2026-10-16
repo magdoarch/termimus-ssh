@@ -157,7 +157,7 @@ export function QuickConnectModal({ isOpen, onClose, onConnect }: QuickConnectMo
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-[var(--text-muted)] hover:text-white transition-colors"
+            className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           >
             <X size={15} />
           </button>

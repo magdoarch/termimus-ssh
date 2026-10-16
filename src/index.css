@@ -34,6 +34,7 @@
     --secondary: #38bdf8;
     --tertiary: #cbacff;
     --success: #3fb950;
+    --on-success: #04260f;
     --danger: #f85149;
     --warning: #e3b341;
 
@@ -52,18 +53,61 @@
     --accent: var(--primary);
     --accent-hover: var(--primary-hover);
 
+    --scrollbar-thumb: #262a31;
+    --scrollbar-thumb-hover: #3b424e;
+    --focus-ring: rgba(0, 210, 180, 0.25);
+
     color-scheme: dark;
+  }
+
+  /* Light palette. Set via <html data-theme="light"> (see src/lib/appTheme.ts).
+     The terminal keeps its own theme from Settings → Appearance & Terminal. */
+  :root[data-theme="light"] {
+    --canvas: #f5f7fa;
+    --surface: #ffffff;
+    --surface-low: #eef1f5;
+    --surface-container: #ffffff;
+    --surface-high: #e3e8ee;
+    --surface-highest: #d5dce5;
+    --border: #d8dee6;
+    --border-subtle: #c5cdd8;
+    --border-muted: #e6eaf0;
+
+    /* Darker teal so it stays readable as text/icons on white */
+    --primary: #00897b;
+    --primary-hover: #00796b;
+    --on-primary: #ffffff;
+
+    --secondary: #0277bd;
+    --tertiary: #7c3aed;
+    --success: #1a7f37;
+    --on-success: #ffffff;
+    --danger: #cf222e;
+    --warning: #9a6700;
+
+    --text-primary: #1f2328;
+    --text-secondary: #57606a;
+    --text-muted: #6e7781;
+
+    --scrollbar-thumb: #c5cdd8;
+    --scrollbar-thumb-hover: #a8b3c1;
+    --focus-ring: rgba(0, 137, 123, 0.25);
+
+    color-scheme: light;
   }
 
   html {
     color-scheme: dark;
   }
 
+  html[data-theme="light"] {
+    color-scheme: light;
+  }
+
   select {
     appearance: none;
     -webkit-appearance: none;
     -moz-appearance: none;
-    color-scheme: dark;
     background-color: var(--surface-container);
     color: var(--text-primary);
     border: 1px solid var(--border);
@@ -84,7 +128,7 @@
   select:focus {
     outline: none;
     border-color: var(--primary);
-    box-shadow: 0 0 0 1px rgba(0, 210, 180, 0.25);
+    box-shadow: 0 0 0 1px var(--focus-ring);
   }
 
   select:disabled {
@@ -93,13 +137,12 @@
   }
 
   select option {
-    background-color: #1c2026;
-    color: #f0f6fc;
+    background-color: var(--surface-container);
+    color: var(--text-primary);
     padding: 8px 12px;
   }
 
   input, textarea {
-    color-scheme: dark;
     background-color: var(--surface-container);
     color: var(--text-primary);
   }
@@ -136,11 +179,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: #262a31;
+    background: var(--scrollbar-thumb);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3b424e;
+    background: var(--scrollbar-thumb-hover);
   }
 
   .gpu-layer {

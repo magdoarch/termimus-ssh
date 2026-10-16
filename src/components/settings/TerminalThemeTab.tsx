@@ -1,4 +1,6 @@
-import { Palette, Type, Highlighter, RotateCcw, Check } from "lucide-react";
+import { Palette, Type, Highlighter, RotateCcw, Check, Moon, Sun, MonitorCog, SunMoon } from "lucide-react";
+import { useSettingsStore } from "../../stores/useSettingsStore";
+import type { AppTheme } from "../../lib/appTheme";
 import { TERMINAL_THEMES } from "../../lib/terminalThemes";
 import {
   HIGHLIGHT_PATTERNS,
@@ -40,6 +42,54 @@ function Toggle({
   );
 }
 
+const APP_THEME_OPTIONS: { value: AppTheme; label: string; icon: typeof Moon }[] = [
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "light", label: "Light", icon: Sun },
+  { value: "system", label: "System", icon: MonitorCog },
+];
+
+function AppThemeCard() {
+  const appTheme = useSettingsStore((s) => s.appTheme);
+  const setAppTheme = useSettingsStore((s) => s.setAppTheme);
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-low)] overflow-hidden shadow-sm">
+      <div className="border-b border-[var(--border)] px-5 py-3.5 bg-[var(--surface-container)]/30">
+        <h4 className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-2">
+          <SunMoon size={15} className="text-[var(--primary)]" />
+          App Theme
+        </h4>
+        <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+          Light or dark mode for menus, lists and dialogs. System follows your OS setting.
+          The terminal keeps the Terminal Theme chosen below.
+        </p>
+      </div>
+      <div className="flex gap-2 p-5" role="radiogroup" aria-label="App theme">
+        {APP_THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
+          const selected = appTheme === value;
+          return (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => setAppTheme(value)}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-xs font-semibold transition ${
+                selected
+                  ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                  : "border-[var(--border)] bg-[var(--surface-container)] text-[var(--text-secondary)] hover:border-[var(--border-subtle)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const HIGHLIGHT_ORDER: HighlightKey[] = [
   "error",
   "warning",
@@ -63,6 +113,8 @@ export function TerminalThemeTab() {
 
   return (
     <div className="space-y-5">
+      <AppThemeCard />
+
       {/* ── Theme preset grid ─────────────────────────────────────────── */}
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-low)] overflow-hidden shadow-sm">
         <div className="border-b border-[var(--border)] px-5 py-3.5 bg-[var(--surface-container)]/30">

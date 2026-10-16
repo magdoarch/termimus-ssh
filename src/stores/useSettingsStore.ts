@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import type { AppTheme } from "../lib/appTheme";
 
 export type AutoLockPolicy =
   | "never"
@@ -20,6 +21,9 @@ interface SettingsState {
   useOsKeyring: boolean;
   useBiometrics: boolean;
   autoLockPolicy: AutoLockPolicy;
+  /** UI theme; read by public/theme-init.js before the bundle loads */
+  appTheme: AppTheme;
+  setAppTheme: (v: AppTheme) => void;
   setUseOsKeyring: (v: boolean) => void;
   setUseBiometrics: (v: boolean) => void;
   setAutoLockPolicy: (v: AutoLockPolicy) => void;
@@ -31,6 +35,8 @@ export const useSettingsStore = create<SettingsState>()(
       useOsKeyring: false,
       useBiometrics: false,
       autoLockPolicy: "on_close",
+      appTheme: "dark",
+      setAppTheme: (v) => set({ appTheme: v }),
       setUseOsKeyring: (v) => set({ useOsKeyring: v }),
       setUseBiometrics: (v) => set({ useBiometrics: v }),
       setAutoLockPolicy: (v) => set({ autoLockPolicy: v }),

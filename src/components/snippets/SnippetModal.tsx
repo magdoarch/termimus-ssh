@@ -86,7 +86,7 @@ export function SnippetModal() {
           </div>
           <button
             onClick={closeModal}
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
           >
             <X size={18} />
           </button>
@@ -216,7 +216,7 @@ export function SnippetModal() {
             <button
               type="button"
               onClick={closeModal}
-              className="rounded-md px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+              className="rounded-md px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
             >
               Cancel
             </button>

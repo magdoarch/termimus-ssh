@@ -318,7 +318,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
           <button
             type="button"
             onClick={closeHostModal}
-            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-white transition-colors"
+            className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition-colors"
           >
             <X size={18} />
           </button>
@@ -352,7 +352,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                       className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
                         protocol === value
                           ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-sm"
-                          : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-white hover:bg-[var(--surface-high)]"
+                          : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-high)]"
                       }`}
                     >
                       <Icon size={13} /> {optionLabel}
@@ -523,7 +523,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                     className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
                       authMethod === "password"
                         ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-sm"
-                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-white hover:bg-[var(--surface-high)]"
+                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-high)]"
                     }`}
                   >
                     <Lock size={13} /> Password
@@ -538,7 +538,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                     className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
                       authMethod === "none"
                         ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-sm"
-                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-white hover:bg-[var(--surface-high)]"
+                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-high)]"
                     }`}
                   >
                     <Unlock size={13} /> No Password
@@ -553,7 +553,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                     className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
                       authMethod === "private_key"
                         ? "bg-[var(--primary)] text-[var(--on-primary)] shadow-sm"
-                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-white hover:bg-[var(--surface-high)]"
+                        : "bg-[var(--surface-container)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-high)]"
                     }`}
                   >
                     <Key size={13} /> Key PEM
@@ -683,7 +683,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                             onClick={() => handleCopyPublicKey(selectedKeyItem.public_key)}
                             className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                               copied
-                                ? "bg-[var(--success)] text-black"
+                                ? "bg-[var(--success)] text-[var(--on-success)]"
                                 : "bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-[var(--on-primary)]"
                             }`}
                           >
@@ -788,7 +788,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
             <button
               type="button"
               onClick={closeHostModal}
-              className="rounded-xl px-4 py-2 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-white transition-colors"
+              className="rounded-xl px-4 py-2 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition-colors"
             >
               Cancel
             </button>

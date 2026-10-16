@@ -211,7 +211,7 @@ export function TunnelView() {
                   toggleTunnel(contextMenu.rule!);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 {activeRuleIds.has(contextMenu.rule.id) ? (
                   <>
@@ -294,7 +294,7 @@ export function TunnelView() {
                   openCreateModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Port Forward Rule</span>
@@ -379,7 +379,7 @@ const TunnelCard = memo(function TunnelCard({
             onClick={() => onEdit(rule)}
             disabled={isActive}
             title="Edit rule"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white disabled:opacity-30"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] disabled:opacity-30"
           >
             <Pencil size={13} />
           </button>

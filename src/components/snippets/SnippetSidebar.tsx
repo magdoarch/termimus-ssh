@@ -291,7 +291,7 @@ export function SnippetSidebar() {
                 }
                 className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-mono font-medium transition-colors ${
                   isBroadcast
-                    ? "bg-[var(--primary)] text-black hover:bg-[var(--primary-hover)] shadow-xs"
+                    ? "bg-[var(--primary)] text-[var(--on-primary)] hover:bg-[var(--primary-hover)] shadow-xs"
                     : "border border-[var(--border)] bg-[var(--surface-high)] text-[var(--text-primary)] hover:border-[var(--primary)]/50 hover:text-[var(--primary)]"
                 }`}
               >
@@ -375,7 +375,7 @@ export function SnippetSidebar() {
               onClick={() => setSelectedTag(null)}
               className={`rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 transition-colors ${
                 selectedTag === null
-                  ? "bg-[var(--primary)] text-black"
+                  ? "bg-[var(--primary)] text-[var(--on-primary)]"
                   : "bg-[var(--surface-container)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               }`}
             >
@@ -387,7 +387,7 @@ export function SnippetSidebar() {
                 onClick={() => setSelectedTag((prev) => (prev === tag ? null : tag))}
                 className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium shrink-0 transition-colors ${
                   selectedTag === tag
-                    ? "bg-[var(--primary)] text-black"
+                    ? "bg-[var(--primary)] text-[var(--on-primary)]"
                     : "bg-[var(--surface-container)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 }`}
               >
@@ -420,7 +420,7 @@ export function SnippetSidebar() {
             {snippets.length === 0 && (
               <button
                 onClick={openCreateModal}
-                className="mt-3 flex items-center gap-1 rounded-md bg-[var(--primary)] px-2.5 py-1 text-xs font-semibold text-black hover:bg-[var(--primary-hover)] transition-colors shadow-xs"
+                className="mt-3 flex items-center gap-1 rounded-md bg-[var(--primary)] px-2.5 py-1 text-xs font-semibold text-[var(--on-primary)] hover:bg-[var(--primary-hover)] transition-colors shadow-xs"
               >
                 <Plus size={13} />
                 <span>Add First Snippet</span>
@@ -465,7 +465,7 @@ export function SnippetSidebar() {
                   setContextMenu(null);
                 }}
                 disabled={!hasConnectedTerminal}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group disabled:opacity-40 disabled:pointer-events-none"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group disabled:opacity-40 disabled:pointer-events-none"
               >
                 <Play size={13} />
                 <span>
@@ -523,7 +523,7 @@ export function SnippetSidebar() {
                   openCreateModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Snippet</span>
@@ -689,8 +689,8 @@ const SidebarSnippetCard = memo(function SidebarSnippetCard({
               }
               className={`flex-1 flex items-center justify-center gap-1.5 rounded py-1.5 text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                 isMultiTerminal && isSyncActive
-                  ? "bg-[var(--primary)] text-black hover:bg-[var(--primary-hover)] shadow-xs"
-                  : "bg-[var(--surface-high)] text-[var(--primary)] border border-[var(--border)] hover:bg-[var(--primary)] hover:text-black hover:border-[var(--primary)]"
+                  ? "bg-[var(--primary)] text-[var(--on-primary)] hover:bg-[var(--primary-hover)] shadow-xs"
+                  : "bg-[var(--surface-high)] text-[var(--primary)] border border-[var(--border)] hover:bg-[var(--primary)] hover:text-[var(--on-primary)] hover:border-[var(--primary)]"
               }`}
             >
               {isMultiTerminal && isSyncActive ? (

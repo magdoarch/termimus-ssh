@@ -279,7 +279,7 @@ export function KeychainView() {
                     showCopyToast("Copied public key");
                     setContextMenu(null);
                   }}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
                 >
                   <Copy size={13} />
                   <span>Copy Public Key</span>
@@ -354,7 +354,7 @@ export function KeychainView() {
                   openCreateKeyModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Key size={13} />
                 <span>New SSH Key</span>
@@ -446,7 +446,7 @@ const KeyCard = memo(function KeyCard({
           title="Copy public key"
           className={`flex flex-1 items-center justify-center gap-1 rounded-md py-1.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
             isCopied
-              ? "bg-[var(--success)] text-black font-semibold"
+              ? "bg-[var(--success)] text-[var(--on-success)] font-semibold"
               : "bg-[var(--surface-high)] text-[var(--text-primary)] hover:bg-[var(--surface-highest)]"
           }`}
         >

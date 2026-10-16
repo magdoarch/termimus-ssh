@@ -256,7 +256,7 @@ export function SnippetView() {
                   setContextMenu(null);
                 }}
                 disabled={!hasActiveTerminal}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group disabled:opacity-40 disabled:pointer-events-none"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group disabled:opacity-40 disabled:pointer-events-none"
               >
                 <Play size={13} />
                 <span>Run in Active Terminal</span>
@@ -311,7 +311,7 @@ export function SnippetView() {
                   openCreateModal();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-black transition-colors group"
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 hover:bg-[var(--primary)] hover:text-[var(--on-primary)] transition-colors group"
               >
                 <Plus size={13} />
                 <span>New Snippet</span>
@@ -398,7 +398,7 @@ const SnippetCard = memo(function SnippetCard({
               className={`rounded p-1 transition-colors ${
                 isRevealed
                   ? "text-[var(--warning)] bg-[var(--warning)]/15"
-                  : "text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+                  : "text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
               }`}
             >
               {isRevealed ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -407,14 +407,14 @@ const SnippetCard = memo(function SnippetCard({
           <button
             onClick={handleCopy}
             title={isCopied ? "Copied!" : "Copy command"}
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white transition-colors"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)] transition-colors"
           >
             {isCopied ? <Check size={13} className="text-[var(--success)]" /> : <Copy size={13} />}
           </button>
           <button
             onClick={() => onEdit(snippet)}
             title="Edit snippet"
-            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-white"
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--border)] hover:text-[var(--text-primary)]"
           >
             <Pencil size={13} />
           </button>

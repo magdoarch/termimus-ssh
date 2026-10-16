@@ -231,7 +231,7 @@ export function VaultModal() {
               type="button"
               onClick={closeUnlockPrompt}
               title="Cancel (vault stays locked)"
-              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-white transition-colors shrink-0"
+              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--surface-high)] hover:text-[var(--text-primary)] transition-colors shrink-0"
             >
               <X size={18} />
             </button>
@@ -424,7 +424,7 @@ export function VaultModal() {
                 <button
                   type="button"
                   onClick={() => setShowSyncToken(!showSyncToken)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-white"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
                   {showSyncToken ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -450,7 +450,7 @@ export function VaultModal() {
                 <button
                   type="button"
                   onClick={() => setShowSyncPassphrase(!showSyncPassphrase)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-white"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
                   {showSyncPassphrase ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
@@ -480,7 +480,7 @@ export function VaultModal() {
                 <button
                   type="button"
                   onClick={() => setShowSyncMasterPassword(!showSyncMasterPassword)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-white"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 >
                   {showSyncMasterPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>

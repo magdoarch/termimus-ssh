@@ -26,6 +26,8 @@ import { useKeychainStore } from "./stores/useKeychainStore";
 import { useUpdateStore } from "./stores/useUpdateStore";
 import { useAutoLock } from "./hooks/useAutoLock";
 import { useLiveSync } from "./hooks/useLiveSync";
+import { useSettingsStore } from "./stores/useSettingsStore";
+import { applyAppTheme } from "./lib/appTheme";
 
 // Helper component for native-feel stacked views:
 // Keeps views mounted in the DOM once visited, switching visibility in 0ms
@@ -55,6 +57,7 @@ function App() {
   const refreshKeychain = useKeychainStore((s) => s.refresh);
   const tabsCount = useSessionStore((s) => s.tabs.length);
   const prevTabsCountRef = useRef(tabsCount);
+  const appTheme = useSettingsStore((s) => s.appTheme);
 
   const handleNavChange = useCallback((tab: ActiveTab) => {
     setActiveNav(tab);
@@ -79,6 +82,11 @@ function App() {
 
   // Background real-time WebSocket live sync manager
   useLiveSync();
+
+  // Light / dark / follow-OS UI theme (CSS variables in index.css).
+  useEffect(() => {
+    applyAppTheme(appTheme);
+  }, [appTheme]);
 
   // Enforce small minimum window size (480x360) so users can snap/tile to half screen
   // on sub-1080p displays (e.g. 1366x768 half is 683px, 1280x800 half is 640px).

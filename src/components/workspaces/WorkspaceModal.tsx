@@ -217,7 +217,7 @@ export function WorkspaceModal() {
                     <div
                       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
                         isSelected
-                          ? "bg-[var(--primary)] text-black"
+                          ? "bg-[var(--primary)] text-[var(--on-primary)]"
                           : "bg-[var(--surface-high)] text-[var(--text-secondary)]"
                       }`}
                     >
@@ -318,7 +318,7 @@ export function WorkspaceModal() {
             <button
               type="submit"
               disabled={hosts.length === 0}
-              className="rounded-xl bg-[var(--primary)] px-5 py-2 text-xs font-semibold text-black shadow-md hover:bg-[var(--primary)]/90 transition-all disabled:opacity-50"
+              className="rounded-xl bg-[var(--primary)] px-5 py-2 text-xs font-semibold text-[var(--on-primary)] shadow-md hover:bg-[var(--primary)]/90 transition-all disabled:opacity-50"
             >
               {isEditing ? "Save Changes" : "Create Preset"}
             </button>
