@@ -56,6 +56,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 - **Terminal Interconnection & Input Broadcast**: One-click synchronized input across all split panes (`SYNC` toggle / `Alt+B`) to broadcast keystrokes and run commands simultaneously across multiple servers.
 - **Session Geometry Protection**: Background tabs stay mounted without collapsing to 0×0 geometry, preventing remote `htop`, `vim`, and curses TUIs from corrupting due to bogus SIGWINCH events.
 - **Quick Connect**: Instant fuzzy-search launcher accessible anywhere with `Ctrl+K`.
+- **Terminal Links**: Ctrl+click (Cmd+click on macOS) opens URLs in the terminal.
 - **Light & Dark**: Dark, Light or follow-the-system app theme.
 
 ### 🔐 Logins, 2FA & Jump Hosts

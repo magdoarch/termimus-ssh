@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { listen } from "@tauri-apps/api/event";
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { copyText } from "../../lib/clipboard";
+import { openExternalUrl } from "../../lib/openUrl";
 import {
   Copy,
   Clipboard,
@@ -592,6 +594,25 @@ export function XtermView({ sessionId, hostId, visible, isFocused = true }: Xter
       });
       term.loadAddon(searchAddon);
       searchAddonRef.current = searchAddon;
+
+      // Links open with Ctrl+click (Cmd+click on macOS); a plain click still
+      // selects text.
+      const linkModifier = checkIsMac() ? "Cmd" : "Ctrl";
+      term.loadAddon(
+        new WebLinksAddon(
+          (event, uri) => {
+            if (event.ctrlKey || event.metaKey) openExternalUrl(uri);
+          },
+          {
+            hover: (_event, uri) => {
+              domWrapper.title = `${linkModifier}+click to open ${uri}`;
+            },
+            leave: () => {
+              domWrapper.title = "";
+            },
+          }
+        )
+      );
 
       term.open(domWrapper);
 
