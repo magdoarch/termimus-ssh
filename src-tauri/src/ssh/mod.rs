@@ -24,6 +24,10 @@ mod auth_tests;
 /// server that keeps asking must not hang the connect forever.
 const MAX_KBD_INTERACTIVE_ROUNDS: usize = 10;
 
+/// Tries for a password or key passphrase typed at login (ssh's
+/// NumberOfPasswordPrompts).
+const SECRET_ATTEMPTS: usize = 3;
+
 /// Configures a `TcpStream` with low-latency (`TCP_NODELAY`) and socket-level
 /// TCP keepalive (15s idle probe, 5s retry interval) to prevent stateful NAT routers,
 /// middleboxes, and cloud VPC firewalls from terminating idle connections.
@@ -166,6 +170,8 @@ impl Handler for SshClientHandler {
 #[derive(Clone)]
 pub enum SshAuth {
     Password(String),
+    /// No password saved for the host: ask for it at every login.
+    AskPassword,
     PrivateKey { pem: String, passphrase: Option<String> },
 }
 
@@ -309,28 +315,101 @@ pub(crate) async fn authenticate_with<P: AuthPrompter>(
     target: &str,
     prompter: &P,
 ) -> Result<bool, String> {
-    let first = match auth {
-        SshAuth::Password(password) => handle
-            .authenticate_password(username, password)
-            .await
-            .map_err(|e| format!("Auth error: {e}"))?,
+    // `password` answers a keyboard-interactive "Password:" prompt later on.
+    let (first, password) = match auth {
+        SshAuth::Password(password) => {
+            let result = handle
+                .authenticate_password(username, password)
+                .await
+                .map_err(|e| format!("Auth error: {e}"))?;
+            (result, Some(Zeroizing::new(password.clone())))
+        }
+        SshAuth::AskPassword => ask_password_login(handle, username, target, prompter).await?,
         SshAuth::PrivateKey { pem, passphrase } => {
-            let key_pair = decode_secret_key(pem, passphrase.as_deref())
-                .map_err(|e| format!("Invalid private key: {e}"))?;
-            authenticate_publickey_smart(handle, username, key_pair).await?
+            let key_pair = load_private_key(pem, passphrase.as_deref(), target, prompter).await?;
+            (authenticate_publickey_smart(handle, username, key_pair).await?, None)
         }
     };
     match first {
         AuthResult::Success => Ok(true),
         AuthResult::Failure { remaining_methods } if remaining_methods.contains(&MethodKind::KeyboardInteractive) => {
-            let stored_password = match auth {
-                SshAuth::Password(password) => Some(Zeroizing::new(password.clone())),
-                SshAuth::PrivateKey { .. } => None,
-            };
-            keyboard_interactive(handle, username, stored_password, target, prompter).await
+            keyboard_interactive(handle, username, password, target, prompter).await
         }
         AuthResult::Failure { .. } => Ok(false),
     }
+}
+
+/// Ask the user for one hidden value; `None` from the prompter cancels the login.
+async fn ask_secret<P: AuthPrompter>(
+    prompter: &P,
+    target: &str,
+    title: &str,
+    instructions: &str,
+    label: &str,
+) -> Result<Zeroizing<String>, String> {
+    let request = AuthPromptRequest {
+        target: target.to_string(),
+        name: title.to_string(),
+        instructions: instructions.to_string(),
+        prompts: vec![PromptField { prompt: label.to_string(), echo: false }],
+    };
+    prompter
+        .ask(request)
+        .await
+        .and_then(|answers| answers.into_iter().next())
+        .map(Zeroizing::new)
+        .ok_or_else(|| "Authentication cancelled".to_string())
+}
+
+/// Password login for a host without a saved password. The user is only asked
+/// when the server takes the `password` method; one that takes passwords
+/// through keyboard-interactive alone asks with its own prompt afterwards.
+/// Returns the last password typed, for that keyboard-interactive round.
+async fn ask_password_login<P: AuthPrompter>(
+    handle: &mut Handle<SshClientHandler>,
+    username: &str,
+    target: &str,
+    prompter: &P,
+) -> Result<(AuthResult, Option<Zeroizing<String>>), String> {
+    let auth_error = |e: russh::Error| format!("Auth error: {e}");
+    let mut result = handle.authenticate_none(username).await.map_err(auth_error)?;
+    let mut typed = None;
+    for attempt in 0..SECRET_ATTEMPTS {
+        let AuthResult::Failure { remaining_methods } = &result else { break };
+        if !remaining_methods.contains(&MethodKind::Password) {
+            break;
+        }
+        let instructions = if attempt == 0 { "" } else { "Wrong password, try again." };
+        let password = ask_secret(prompter, target, "Password", instructions, "Password").await?;
+        result = handle
+            .authenticate_password(username, password.as_str())
+            .await
+            .map_err(auth_error)?;
+        typed = Some(password);
+    }
+    Ok((result, typed))
+}
+
+/// Decode a saved key. An encrypted key saved without its passphrase asks
+/// for it, like ssh does.
+async fn load_private_key<P: AuthPrompter>(
+    pem: &str,
+    passphrase: Option<&str>,
+    target: &str,
+    prompter: &P,
+) -> Result<russh::keys::PrivateKey, String> {
+    match decode_secret_key(pem, passphrase) {
+        Err(e) if passphrase.is_none() && crate::sshkey::is_missing_passphrase(pem, &e) => {}
+        decoded => return decoded.map_err(|e| format!("Invalid private key: {e}")),
+    }
+    for attempt in 0..SECRET_ATTEMPTS {
+        let instructions = if attempt == 0 { "The private key is encrypted." } else { "Wrong passphrase, try again." };
+        let typed = ask_secret(prompter, target, "Key passphrase", instructions, "Passphrase").await?;
+        if let Ok(key) = decode_secret_key(pem, Some(typed.as_str())) {
+            return Ok(key);
+        }
+    }
+    Err("Wrong passphrase for the private key".to_string())
 }
 
 async fn keyboard_interactive<P: AuthPrompter>(

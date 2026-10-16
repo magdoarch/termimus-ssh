@@ -60,6 +60,7 @@ Prebuilt installers for every release are published automatically to the **[GitH
 
 ### 🔐 Logins, 2FA & Jump Hosts
 - **Two-Factor Login**: Keyboard-interactive prompts (OTP codes, Duo, PAM questions) appear in a dialog.
+- **Asked When Needed**: Hosts without a saved password, and keys without a saved passphrase, ask at login instead of failing.
 
 ### 🖼️ Remote Desktop
 - **VNC & RDP Tabs**: Remote desktops open in tabs next to your terminals, optionally tunneled through an SSH jump host; RDP shares the text clipboard.

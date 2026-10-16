@@ -26,6 +26,10 @@ struct ServerPolicy {
     /// Accepted as a first factor; keyboard-interactive must follow
     /// (`AuthenticationMethods publickey,keyboard-interactive`).
     first_factor_key: Option<PublicKey>,
+    /// Accepted by the plain `password` method (`PasswordAuthentication yes`).
+    password_method: Option<&'static str>,
+    /// Accepted on its own.
+    accepted_key: Option<PublicKey>,
 }
 
 struct TestServer {
@@ -36,17 +40,38 @@ fn only_keyboard_interactive() -> Option<MethodSet> {
     Some(MethodSet::from(&[MethodKind::KeyboardInteractive][..]))
 }
 
+impl TestServer {
+    fn offered_methods(&self) -> Option<MethodSet> {
+        let mut methods = vec![MethodKind::PublicKey, MethodKind::KeyboardInteractive];
+        if self.policy.password_method.is_some() {
+            methods.push(MethodKind::Password);
+        }
+        Some(MethodSet::from(&methods[..]))
+    }
+}
+
 impl server::Handler for TestServer {
     type Error = anyhow::Error;
 
-    // The plain password method is disabled (PasswordAuthentication no);
-    // passwords are only taken through keyboard-interactive (PAM).
-    async fn auth_password(&mut self, _user: &str, _password: &str) -> Result<Auth, Self::Error> {
-        Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive() })
+    async fn auth_none(&mut self, _user: &str) -> Result<Auth, Self::Error> {
+        Ok(Auth::Reject { proceed_with_methods: self.offered_methods() })
+    }
+
+    // Unless `password_method` is set, the plain password method is disabled
+    // (PasswordAuthentication no); passwords are only taken through
+    // keyboard-interactive (PAM).
+    async fn auth_password(&mut self, _user: &str, password: &str) -> Result<Auth, Self::Error> {
+        match self.policy.password_method {
+            Some(expected) if expected == password => Ok(Auth::Accept),
+            Some(_) => Ok(Auth::Reject { proceed_with_methods: self.offered_methods() }),
+            None => Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive() }),
+        }
     }
 
     async fn auth_publickey(&mut self, _user: &str, key: &PublicKey) -> Result<Auth, Self::Error> {
-        if self.policy.first_factor_key.as_ref() == Some(key) {
+        if self.policy.accepted_key.as_ref() == Some(key) {
+            Ok(Auth::Accept)
+        } else if self.policy.first_factor_key.as_ref() == Some(key) {
             // First factor done; the client must continue with keyboard-interactive.
             Ok(Auth::Reject { proceed_with_methods: only_keyboard_interactive() })
         } else {
@@ -218,4 +243,50 @@ async fn unknown_key_without_keyboard_interactive_is_rejected() {
     let user = ScriptedUser::answering(Some(&[OTP]));
     assert_eq!(login(port, SshAuth::PrivateKey { pem, passphrase: None }, &user).await, Ok(false));
     assert!(user.asked_prompts().is_empty());
+}
+
+#[tokio::test]
+async fn password_is_asked_when_none_is_saved() {
+    let port = spawn_server(ServerPolicy { password_method: Some("pw"), ..Default::default() }).await;
+    let user = ScriptedUser::answering(Some(&["pw"]));
+    assert_eq!(login(port, SshAuth::AskPassword, &user).await, Ok(true));
+    assert_eq!(user.asked_prompts(), vec![vec![("Password".to_string(), false)]]);
+}
+
+#[tokio::test]
+async fn wrong_typed_password_is_asked_again_then_rejected() {
+    let port = spawn_server(ServerPolicy { password_method: Some("pw"), ..Default::default() }).await;
+    let user = ScriptedUser::answering(Some(&["nope"]));
+    assert_eq!(login(port, SshAuth::AskPassword, &user).await, Ok(false));
+    assert_eq!(user.asked_prompts().len(), 3);
+}
+
+#[tokio::test]
+async fn keyboard_interactive_only_server_asks_with_its_own_prompt() {
+    // PasswordAuthentication no + PAM: no up-front password dialog, the
+    // server's "Password: " prompt is shown once.
+    let port = spawn_server(ServerPolicy { password: Some("pw"), ..Default::default() }).await;
+    let user = ScriptedUser::answering(Some(&["pw"]));
+    assert_eq!(login(port, SshAuth::AskPassword, &user).await, Ok(true));
+    assert_eq!(user.asked_prompts(), vec![vec![("Password: ".to_string(), false)]]);
+}
+
+#[tokio::test]
+async fn encrypted_key_without_saved_passphrase_asks_for_it() {
+    use russh::keys::ssh_key::{Cipher, Kdf};
+    let key = PrivateKey::random(&mut rand::rngs::OsRng, Algorithm::Ed25519).unwrap();
+    let port = spawn_server(ServerPolicy { accepted_key: Some(key.public_key().clone()), ..Default::default() }).await;
+    // One bcrypt round keeps the debug-build test fast.
+    let kdf = Kdf::Bcrypt { salt: vec![7; 16], rounds: 1 };
+    let encrypted = key.encrypt_with(Cipher::Aes256Ctr, kdf, 42, "hunter2").unwrap();
+    let pem = encrypted.to_openssh(LineEnding::LF).unwrap().to_string();
+
+    let user = ScriptedUser::answering(Some(&["wrong"]));
+    let auth = SshAuth::PrivateKey { pem: pem.clone(), passphrase: None };
+    assert_eq!(login(port, auth, &user).await, Err("Wrong passphrase for the private key".to_string()));
+    assert_eq!(user.asked_prompts().len(), 3);
+
+    let user = ScriptedUser::answering(Some(&["hunter2"]));
+    assert_eq!(login(port, SshAuth::PrivateKey { pem, passphrase: None }, &user).await, Ok(true));
+    assert_eq!(user.asked_prompts(), vec![vec![("Passphrase".to_string(), false)]]);
 }

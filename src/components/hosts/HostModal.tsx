@@ -649,7 +649,7 @@ export function HostModal({ onOpenKeychain }: HostModalProps = {}) {
                             setShowPassword(true);
                           }}
                           disabled={passwordLoading}
-                          placeholder={passwordLoading ? "Loading..." : protocol === "vnc" ? "VNC password..." : protocol === "rdp" ? "Windows / RDP password..." : "Server password..."}
+                          placeholder={passwordLoading ? "Loading..." : protocol === "vnc" ? "VNC password..." : protocol === "rdp" ? "Windows / RDP password..." : "Server password (leave empty to be asked when connecting)"}
                           className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-container)] px-3 py-2 pr-9 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/50 focus:border-[var(--primary)] focus:outline-none transition-colors disabled:opacity-60"
                         />
                         <button

@@ -145,6 +145,12 @@ pub fn inspect_key(pem: &str, passphrase: Option<&str>) -> Result<KeyDetails, St
     })
 }
 
+/// Whether decoding failed only because the key is encrypted and no
+/// passphrase was given (OpenSSH, legacy PEM and PKCS#8 keys).
+pub fn is_missing_passphrase(pem: &str, error: &russh::keys::Error) -> bool {
+    matches!(error, russh::keys::Error::KeyIsEncrypted) || pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
