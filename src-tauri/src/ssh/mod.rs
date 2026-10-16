@@ -43,11 +43,43 @@ pub fn configure_tcp_stream(stream: &tokio::net::TcpStream) {
 /// Sends `keepalive@openssh.com` probes every 15 seconds to ensure sessions
 /// (interactive shells, long-running monitoring like btop/htop, SFTP, tunnels)
 /// never get dropped by remote servers or NAT translation timeouts.
-pub fn default_client_config() -> Arc<client::Config> {
+fn base_client_config() -> client::Config {
     let mut config = client::Config::default();
     config.keepalive_interval = Some(Duration::from_secs(15));
     config.keepalive_max = 4;
+    config
+}
+
+pub fn default_client_config() -> Arc<client::Config> {
+    Arc::new(base_client_config())
+}
+
+/// Client config for a connection to `address:port`. When a host key is
+/// already trusted for it, that key's algorithm goes first in the host-key
+/// preference list (as OpenSSH does), so the server presents the same kind of
+/// key we pinned (say, one pinned before the server got an Ed25519 key) rather
+/// than a different type that would trip the "host key changed" check.
+pub fn client_config_for(db: &Database, address: &str, port: u16) -> Arc<client::Config> {
+    let mut config = base_client_config();
+    if let Ok(Some(known)) = db.get_known_host(address, port) {
+        config.preferred.key = std::borrow::Cow::Owned(prefer_host_key_algorithm(&config.preferred.key, &known.key_type));
+    }
     Arc::new(config)
+}
+
+fn prefer_host_key_algorithm(order: &[russh::keys::Algorithm], key_type: &str) -> Vec<russh::keys::Algorithm> {
+    use russh::keys::Algorithm;
+    let Ok(pinned) = Algorithm::new(key_type) else {
+        return order.to_vec();
+    };
+    // Every RSA signature variant (rsa-sha2-512/256, ssh-rsa) uses the same key.
+    let same_kind = |a: &Algorithm| matches!((&pinned, a), (Algorithm::Rsa { .. }, Algorithm::Rsa { .. })) || *a == pinned;
+    order
+        .iter()
+        .filter(|a| same_kind(a))
+        .chain(order.iter().filter(|a| !same_kind(a)))
+        .cloned()
+        .collect()
 }
 
 /// Progress payload emitted to the frontend during connection handshake.
@@ -482,13 +514,14 @@ pub async fn open_transport(
                 .await
                 .map_err(|e| format!("Failed to reach Jump Host {}:{}: {e}", jump.address, jump.port))?;
             configure_tcp_stream(&jump_tcp);
+            let jump_config = client_config_for(&db, &jump.address, jump.port);
             let jump_handler = SshClientHandler {
                 address: jump.address.clone(),
                 port: jump.port,
                 db,
                 forwarded_tcpip: None,
             };
-            let mut j_handle = client::connect_stream(default_client_config(), jump_tcp, jump_handler)
+            let mut j_handle = client::connect_stream(jump_config, jump_tcp, jump_handler)
                 .await
                 .map_err(|e| format!("Jump Host handshake failed: {e}"))?;
             let jump_target = format!("{}@{} (jump host)", jump.username, jump.address);
@@ -547,13 +580,14 @@ pub async fn connect_authenticated_with_forwarding(
 ) -> Result<(Handle<SshClientHandler>, Option<Handle<SshClientHandler>>), String> {
     let (stream, jump_handle) = open_transport(db.clone(), address, port, jump).await?;
 
+    let config = client_config_for(&db, address, port);
     let handler = SshClientHandler {
         address: address.to_string(),
         port,
         db,
         forwarded_tcpip,
     };
-    let mut handle = client::connect_stream(default_client_config(), stream, handler)
+    let mut handle = client::connect_stream(config, stream, handler)
         .await
         .map_err(|e| format!("SSH connection failed: {e}"))?;
     if !authenticate(&mut handle, username, auth, &format!("{username}@{address}")).await? {
@@ -712,7 +746,7 @@ impl SessionManager {
 
             self.check_cancelled(&session_id).await?;
 
-            let jump_config = default_client_config();
+            let jump_config = client_config_for(&db, &jump.address, jump.port);
             let jump_handler = SshClientHandler {
                 address: jump.address.clone(),
                 port: jump.port,
@@ -789,7 +823,7 @@ impl SessionManager {
         };
 
         // ── 2. Target SSH Handshake over the stream ──
-        let config = default_client_config();
+        let config = client_config_for(&db, &address, port);
         let handler = SshClientHandler {
             address: address.clone(),
             port,
@@ -1182,6 +1216,23 @@ pub async fn detect_os_via_exec(app: &AppHandle, db: Arc<Database>, session: Wea
 #[cfg(test)]
 mod tests {
     use tokio::io::{AsyncRead, AsyncWrite};
+
+    #[test]
+    fn pinned_host_key_algorithm_is_negotiated_first() {
+        use russh::keys::Algorithm;
+        let default = super::base_client_config().preferred.key.to_vec();
+        assert_eq!(default[0], Algorithm::Ed25519);
+
+        let ecdsa = super::prefer_host_key_algorithm(&default, "ecdsa-sha2-nistp256");
+        assert_eq!(ecdsa[0].as_str(), "ecdsa-sha2-nistp256");
+        assert_eq!(ecdsa.len(), default.len());
+
+        // A pinned RSA key moves every RSA signature variant up front.
+        let rsa = super::prefer_host_key_algorithm(&default, "ssh-rsa");
+        assert!(rsa[..3].iter().all(|a| matches!(a, Algorithm::Rsa { .. })));
+
+        assert_eq!(super::prefer_host_key_algorithm(&default, "bogus"), default);
+    }
 
     fn _assert_stream<T: AsyncRead + AsyncWrite + Unpin + Send + 'static>() {}
 
