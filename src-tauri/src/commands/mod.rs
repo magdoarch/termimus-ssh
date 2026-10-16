@@ -978,6 +978,7 @@ pub fn ssh_set_connection_sharing(state: State<AppState>, enabled: bool) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn ssh_connect(
     app: AppHandle,
     state: State<'_, AppState>,
