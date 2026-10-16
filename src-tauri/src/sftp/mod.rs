@@ -13,6 +13,9 @@ use tokio::sync::Mutex;
 use crate::db::Database;
 use crate::ssh::{JumpHostConfig, SshAuth, SshClientHandler};
 
+/// Largest file the inline text editor will load.
+const MAX_EDITOR_FILE_SIZE: u64 = 5 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub name: String,
@@ -300,21 +303,27 @@ impl SftpManager {
             .map_err(|e| format!("Cannot read file metadata: {e}"))?;
 
         if let Some(size) = metadata.size {
-            if size > 5 * 1024 * 1024 {
+            if size > MAX_EDITOR_FILE_SIZE {
                 return Err("File is too large to open in the inline editor (max 5 MB)".to_string());
             }
         }
 
-        let mut file = conn
+        let file = conn
             .sftp
             .open_with_flags(remote_path, OpenFlags::READ)
             .await
             .map_err(|e| format!("Failed to open remote file: {e}"))?;
 
+        // The size attribute is optional and the file may grow after stat, so
+        // enforce the limit on what is actually read.
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)
+        file.take(MAX_EDITOR_FILE_SIZE + 1)
+            .read_to_end(&mut buffer)
             .await
             .map_err(|e| format!("Failed to read remote file: {e}"))?;
+        if buffer.len() as u64 > MAX_EDITOR_FILE_SIZE {
+            return Err("File is too large to open in the inline editor (max 5 MB)".to_string());
+        }
 
         String::from_utf8(buffer)
             .map_err(|_| "File contains binary data and cannot be displayed as plain text".to_string())

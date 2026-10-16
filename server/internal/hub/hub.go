@@ -71,7 +71,8 @@ func (h *Hub) run() {
 			}
 
 		case message := <-h.broadcast:
-			h.mu.RLock()
+			// Write lock: slow clients are removed from the map here.
+			h.mu.Lock()
 			for client := range h.clients {
 				select {
 				case client.send <- message:
@@ -80,7 +81,7 @@ func (h *Hub) run() {
 					delete(h.clients, client)
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 		}
 	}
 }
@@ -141,18 +142,9 @@ func (c *Client) WritePump() {
 				return
 			}
 
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			_, _ = w.Write(message)
-
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				_, _ = w.Write(<-c.send)
-			}
-
-			if err := w.Close(); err != nil {
+			// One JSON event per frame: concatenating queued events into a
+			// single frame would make it unparseable for the client.
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 

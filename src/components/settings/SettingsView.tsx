@@ -760,8 +760,8 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     setError(null);
 
-    if (newPassword.length < 6) {
-      setError("New password must be at least 6 characters.");
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -840,7 +840,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
                 required
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="At least 6 characters..."
+                placeholder="At least 8 characters..."
                 className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]/50 focus:border-[var(--primary)] focus:outline-none"
               />
             </div>

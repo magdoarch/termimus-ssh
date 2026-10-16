@@ -15,7 +15,19 @@ func NewAuth(requiredToken string) *AuthMiddleware {
 	return &AuthMiddleware{requiredToken: strings.TrimSpace(requiredToken)}
 }
 
+// Wrap requires the token in the Authorization header.
 func (a *AuthMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
+	return a.wrap(next, false)
+}
+
+// WrapWS also accepts ?token= because browsers can't set headers on a
+// WebSocket handshake. Only used for the WS route so tokens don't end up in
+// access logs for regular API calls.
+func (a *AuthMiddleware) WrapWS(next http.HandlerFunc) http.HandlerFunc {
+	return a.wrap(next, true)
+}
+
+func (a *AuthMiddleware) wrap(next http.HandlerFunc, allowQueryToken bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// If no token is configured on the server, allow all requests
 		if a.requiredToken == "" {
@@ -34,7 +46,7 @@ func (a *AuthMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 		}
 
 		// 2. Check query parameter: ?token=<token> (needed for WebSockets)
-		if qToken := strings.TrimSpace(r.URL.Query().Get("token")); qToken != "" {
+		if qToken := strings.TrimSpace(r.URL.Query().Get("token")); allowQueryToken && qToken != "" {
 			if subtle.ConstantTimeCompare([]byte(qToken), []byte(a.requiredToken)) == 1 {
 				next(w, r)
 				return

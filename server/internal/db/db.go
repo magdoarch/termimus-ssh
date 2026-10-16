@@ -184,7 +184,9 @@ func (d *DB) SaveRevision(deviceID, deviceName, encryptedBlob string, baseVersio
 	const maxRevisionsToKeep = int64(15)
 	if nextVersion > maxRevisionsToKeep {
 		cutoffVersion := nextVersion - maxRevisionsToKeep
-		_, _ = tx.Exec(`DELETE FROM sync_revisions WHERE version <= ?`, cutoffVersion)
+		if _, err := tx.Exec(`DELETE FROM sync_revisions WHERE version <= ?`, cutoffVersion); err != nil {
+			return 0, fmt.Errorf("failed to prune old revisions: %w", err)
+		}
 	}
 
 	// Upsert device
@@ -216,7 +218,7 @@ func (d *DB) GetDevices() ([]DeviceInfo, error) {
 	}
 	defer rows.Close()
 
-	var devices []DeviceInfo
+	devices := []DeviceInfo{} // serialize as [] rather than null when empty
 	for rows.Next() {
 		var dev DeviceInfo
 		if err := rows.Scan(&dev.ID, &dev.Name, &dev.LastSyncAt, &dev.CreatedAt); err != nil {
@@ -224,5 +226,5 @@ func (d *DB) GetDevices() ([]DeviceInfo, error) {
 		}
 		devices = append(devices, dev)
 	}
-	return devices, nil
+	return devices, rows.Err()
 }

@@ -104,8 +104,8 @@ export function VaultModal() {
     setLocalError(null);
 
     if (!isInitialized) {
-      if (password.length < 6) {
-        setLocalError("Master password must be at least 6 characters");
+      if (password.length < 8) {
+        setLocalError("Master password must be at least 8 characters");
         return;
       }
       if (password !== confirmPassword) {

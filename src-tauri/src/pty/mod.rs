@@ -14,7 +14,9 @@ use tokio::sync::RwLock;
 pub struct LocalPtySession {
     pub id: String,
     master: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Keyboard input, written to the PTY in order by a dedicated thread so a
+    /// blocked write (program not reading, huge paste) never stalls the runtime.
+    input_tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
     child: Arc<Mutex<Box<dyn Child + Send + Sync>>>,
 }
 
@@ -117,10 +119,19 @@ impl PtyManager {
             .spawn_command(cmd)
             .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
 
-        let writer = pair
+        let mut writer = pair
             .master
             .take_writer()
             .map_err(|e| format!("Failed to open PTY writer: {e}"))?;
+        let (input_tx, mut input_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        // Ends when the session (and with it the sender) is dropped.
+        std::thread::spawn(move || {
+            while let Some(data) = input_rx.blocking_recv() {
+                if writer.write_all(&data).and_then(|_| writer.flush()).is_err() {
+                    break;
+                }
+            }
+        });
 
         let mut reader = pair
             .master
@@ -130,7 +141,7 @@ impl PtyManager {
         let session = Arc::new(LocalPtySession {
             id: session_id.clone(),
             master: Arc::new(Mutex::new(pair.master)),
-            writer: Arc::new(Mutex::new(writer)),
+            input_tx,
             child: Arc::new(Mutex::new(child)),
         });
 
@@ -160,6 +171,9 @@ impl PtyManager {
 
         let sessions_for_exit = self.sessions.clone();
         let sid_for_exit = session_id.clone();
+        // Weak: holding a strong ref would keep the session (and its child,
+        // killed in Drop) alive after kill() removed it from the map.
+        let session_for_exit = Arc::downgrade(&session);
         let child_for_exit = session.child.clone();
 
         // Adaptive output coalescing (identical to SSH PTY streaming):
@@ -214,14 +228,25 @@ impl PtyManager {
                 let _ = app_clone.emit(&event_name, std::mem::take(&mut pending));
             }
 
-            // Cleanup session from map and reap child process to prevent zombie processes
+            // Cleanup session from map — only if it is still this session, not a
+            // newer one spawned under the same id — and reap the child process.
             {
                 let mut map = sessions_for_exit.write().await;
-                map.remove(&sid_for_exit);
+                if map
+                    .get(&sid_for_exit)
+                    .is_some_and(|current| std::ptr::eq(Arc::as_ptr(current), session_for_exit.as_ptr()))
+                {
+                    map.remove(&sid_for_exit);
+                }
             }
-            if let Ok(mut child) = child_for_exit.lock() {
-                let _ = child.try_wait();
-            }
+            // EOF can arrive slightly before the process exits; a single
+            // try_wait() would then leave a zombie, so wait on a blocking thread.
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Ok(mut child) = child_for_exit.lock() {
+                    let _ = child.wait();
+                }
+            })
+            .await;
 
             let _ = app_clone.emit(&closed_event, ());
         });
@@ -231,17 +256,16 @@ impl PtyManager {
 
     /// Write user keyboard input to the running PTY process.
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<(), String> {
-        let sessions = self.sessions.read().await;
-        let session = sessions
+        let input_tx = self
+            .sessions
+            .read()
+            .await
             .get(session_id)
+            .map(|session| session.input_tx.clone())
             .ok_or_else(|| format!("Local PTY session '{session_id}' not found"))?;
-
-        let mut writer = session.writer.lock().map_err(|e| e.to_string())?;
-        writer
-            .write_all(data)
-            .map_err(|e| format!("PTY write failed: {e}"))?;
-        writer.flush().map_err(|e| format!("PTY flush failed: {e}"))?;
-        Ok(())
+        input_tx
+            .send(data.to_vec())
+            .map_err(|_| "PTY write failed: input closed".to_string())
     }
 
     /// Resize PTY dimensions when window or split pane dimensions change.

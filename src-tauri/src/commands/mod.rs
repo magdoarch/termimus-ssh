@@ -12,7 +12,9 @@ use std::path::Path;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
+#[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
     pub vault: Arc<VaultManager>,
@@ -20,6 +22,39 @@ pub struct AppState {
     pub sftp: Arc<SftpManager>,
     pub tunnel: Arc<TunnelManager>,
     pub pty: Arc<PtyManager>,
+}
+
+/// Minimum master password length for new or changed vault passwords.
+const MIN_MASTER_PASSWORD_LEN: usize = 8;
+
+/// Run CPU-heavy work (Argon2 key derivation, whole-database export/import)
+/// on the blocking pool. Sync Tauri commands run on the main thread and would
+/// freeze the UI; inline in an async command it would stall a runtime worker.
+async fn run_blocking_with_state<T, F>(state: &AppState, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppState) -> Result<T, String> + Send + 'static,
+{
+    let state = state.clone();
+    run_blocking(move || f(&state)).await
+}
+
+/// Check a derived key against the stored verifier without installing it.
+fn verify_vault_key(state: &AppState, key: &[u8; 32]) -> Result<bool, String> {
+    let verifier_ct = state
+        .db
+        .get_vault_meta("verifier_ciphertext")
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Corrupted vault state: verifier missing".to_string())?;
+    let verifier_nonce = state
+        .db
+        .get_vault_meta("verifier_nonce")
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Corrupted vault state: nonce missing".to_string())?;
+    Ok(matches!(
+        VaultManager::decrypt_with_key(key, &verifier_ct, &verifier_nonce),
+        Ok(decrypted) if decrypted == VaultManager::verification_payload()
+    ))
 }
 
 #[derive(Serialize)]
@@ -43,12 +78,19 @@ pub fn vault_status(state: State<AppState>) -> Result<VaultStatus, String> {
 }
 
 #[tauri::command]
-pub fn vault_setup(state: State<AppState>, password: String) -> Result<(), String> {
-    if password.len() < 4 {
-        return Err("Password must be at least 4 characters long".to_string());
+pub async fn vault_setup(state: State<'_, AppState>, password: String) -> Result<(), String> {
+    run_blocking_with_state(&state, move |state| vault_setup_blocking(state, password)).await
+}
+
+fn vault_setup_blocking(state: &AppState, mut password: String) -> Result<(), String> {
+    if password.chars().count() < MIN_MASTER_PASSWORD_LEN {
+        password.zeroize();
+        return Err(format!("Password must be at least {MIN_MASTER_PASSWORD_LEN} characters long"));
     }
     let salt = VaultManager::generate_salt();
-    let key = VaultManager::derive_key(&password, &salt)?;
+    let key = VaultManager::derive_key(&password, &salt);
+    password.zeroize();
+    let key = key?;
 
     state
         .db
@@ -70,34 +112,31 @@ pub fn vault_setup(state: State<AppState>, password: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn vault_unlock(state: State<AppState>, password: String) -> Result<bool, String> {
+pub async fn vault_unlock(state: State<'_, AppState>, password: String) -> Result<bool, String> {
+    run_blocking_with_state(&state, move |state| vault_unlock_blocking(state, password)).await
+}
+
+fn vault_unlock_blocking(state: &AppState, mut password: String) -> Result<bool, String> {
     let salt = state
         .db
         .get_vault_meta("salt")
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "Vault has not been initialized yet".to_string())?;
 
-    let verifier_ct = state
-        .db
-        .get_vault_meta("verifier_ciphertext")
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Corrupted vault state: verifier missing".to_string())?;
+    let key = VaultManager::derive_key(&password, &salt);
+    password.zeroize();
+    let mut key = key?;
 
-    let verifier_nonce = state
-        .db
-        .get_vault_meta("verifier_nonce")
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Corrupted vault state: nonce missing".to_string())?;
-
-    let key = VaultManager::derive_key(&password, &salt)?;
-    state.vault.set_key(key);
-
-    match state.vault.decrypt(&verifier_ct, &verifier_nonce) {
-        Ok(decrypted) if decrypted == VaultManager::verification_payload() => Ok(true),
-        _ => {
-            state.vault.lock();
-            Err("Incorrect master password".to_string())
-        }
+    // Verify before installing, so a wrong password never makes the vault
+    // briefly report "unlocked" with a bad key to concurrent commands.
+    let ok = verify_vault_key(state, &key);
+    if matches!(ok, Ok(true)) {
+        state.vault.set_key(key);
+    }
+    key.zeroize();
+    match ok? {
+        true => Ok(true),
+        false => Err("Incorrect master password".to_string()),
     }
 }
 
@@ -136,7 +175,7 @@ pub(crate) fn unlock_from_keyring_internal(state: &AppState) -> Result<bool, Str
         .map_err(|e| format!("Keyring init failed: {e}"))?;
 
     let hex_key = match entry.get_password() {
-        Ok(k) => k,
+        Ok(k) => zeroize::Zeroizing::new(k),
         Err(keyring::Error::NoEntry) => return Ok(false),
         Err(e) => return Err(format!("Keyring read failed: {e}")),
     };
@@ -152,27 +191,18 @@ pub(crate) fn unlock_from_keyring_internal(state: &AppState) -> Result<bool, Str
             .map_err(|_| "Invalid hex in keyring".to_string())?;
     }
 
-    // Verify the key is correct against the stored verifier before trusting it.
-    state.vault.set_key(key_bytes);
-    let verifier_ct = state
-        .db
-        .get_vault_meta("verifier_ciphertext")
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Corrupted vault state: verifier missing".to_string())?;
-    let verifier_nonce = state
-        .db
-        .get_vault_meta("verifier_nonce")
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "Corrupted vault state: nonce missing".to_string())?;
-
-    match state.vault.decrypt(&verifier_ct, &verifier_nonce) {
-        Ok(decrypted) if decrypted == VaultManager::verification_payload() => Ok(true),
-        _ => {
-            // Key is stale (e.g. master password was changed elsewhere) — clear it.
-            state.vault.lock();
-            let _ = entry.delete_credential();
-            Ok(false)
-        }
+    // Verify the key against the stored verifier before installing it.
+    let ok = verify_vault_key(state, &key_bytes);
+    if matches!(ok, Ok(true)) {
+        state.vault.set_key(key_bytes);
+    }
+    key_bytes.zeroize();
+    if ok? {
+        Ok(true)
+    } else {
+        // Key is stale (e.g. master password was changed elsewhere) — clear it.
+        let _ = entry.delete_credential();
+        Ok(false)
     }
 }
 
@@ -245,13 +275,24 @@ pub fn vault_keyring_clear() -> Result<(), String> {
 /// key, re-encrypts every credential, updates the verifier, and clears any
 /// stale keyring entry so the user must re-enable OS Keyring with the new key.
 #[tauri::command]
-pub fn vault_change_password(
-    state: State<AppState>,
+pub async fn vault_change_password(
+    state: State<'_, AppState>,
     old_password: String,
     new_password: String,
 ) -> Result<(), String> {
-    if new_password.len() < 4 {
-        return Err("New password must be at least 4 characters.".to_string());
+    run_blocking_with_state(&state, move |state| {
+        vault_change_password_blocking(state, zeroize::Zeroizing::new(old_password), zeroize::Zeroizing::new(new_password))
+    })
+    .await
+}
+
+fn vault_change_password_blocking(
+    state: &AppState,
+    old_password: zeroize::Zeroizing<String>,
+    new_password: zeroize::Zeroizing<String>,
+) -> Result<(), String> {
+    if new_password.chars().count() < MIN_MASTER_PASSWORD_LEN {
+        return Err(format!("New password must be at least {MIN_MASTER_PASSWORD_LEN} characters."));
     }
 
     // 1. Verify old password against stored verifier.
@@ -1400,8 +1441,15 @@ pub fn known_host_delete(
 /// the returned string is then an `EncryptedBackupEnvelope` JSON rather than
 /// a plain `BackupBundle`.
 #[tauri::command]
-pub fn backup_export(state: State<AppState>, passphrase: Option<String>) -> Result<String, String> {
-    let bundle = state.db.export_backup_bundle("0.1.0").map_err(|e| e.to_string())?;
+pub async fn backup_export(state: State<'_, AppState>, passphrase: Option<String>) -> Result<String, String> {
+    run_blocking_with_state(&state, move |state| backup_export_blocking(state, passphrase)).await
+}
+
+fn backup_export_blocking(state: &AppState, passphrase: Option<String>) -> Result<String, String> {
+    let bundle = state
+        .db
+        .export_backup_bundle(env!("CARGO_PKG_VERSION"))
+        .map_err(|e| e.to_string())?;
     let bundle_json = serde_json::to_string_pretty(&bundle)
         .map_err(|e| format!("Failed to serialize backup bundle: {e}"))?;
 
@@ -1430,8 +1478,20 @@ pub fn backup_export(state: State<AppState>, passphrase: Option<String>) -> Resu
 }
 
 #[tauri::command]
-pub fn backup_import(
-    state: State<AppState>,
+pub async fn backup_import(
+    state: State<'_, AppState>,
+    backup_json: String,
+    replace_all: bool,
+    passphrase: Option<String>,
+) -> Result<ImportSummary, String> {
+    run_blocking_with_state(&state, move |state| {
+        backup_import_blocking(state, backup_json, replace_all, passphrase)
+    })
+    .await
+}
+
+fn backup_import_blocking(
+    state: &AppState,
     backup_json: String,
     replace_all: bool,
     passphrase: Option<String>,
@@ -1692,7 +1752,8 @@ pub async fn sync_push(
         return Err("Sync Passphrase is required. Termimus enforces zero-knowledge E2EE encryption before uploading to the relay.".to_string());
     }
 
-    let encrypted_blob = backup_export(state, Some(password.to_string()))?;
+    let password = password.to_string();
+    let encrypted_blob = run_blocking_with_state(&state, move |state| backup_export_blocking(state, Some(password))).await?;
 
     let base = server_url.trim_end_matches('/');
     let client = sync_http_client()?;
@@ -1776,12 +1837,12 @@ pub async fn sync_pull(
         return Err("Sync Passphrase is required to decrypt the incoming sync bundle.".to_string());
     }
 
-    let mut summary = backup_import(
-        state,
-        encrypted_blob,
-        replace_all.unwrap_or(false),
-        Some(password.to_string()),
-    )?;
+    let password = password.to_string();
+    let replace_all = replace_all.unwrap_or(false);
+    let mut summary = run_blocking_with_state(&state, move |state| {
+        backup_import_blocking(state, encrypted_blob, replace_all, Some(password))
+    })
+    .await?;
     summary.server_version = body.version;
     Ok(summary)
 }
